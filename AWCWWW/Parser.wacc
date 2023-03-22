@@ -1,0 +1,673 @@
+import Lexer.wacc
+import AST.wacc
+
+enum associativity contains
+    ASSOC_LEFT, ASSOC_RIGHT, ASSOC_NONE
+end
+
+class Parser contains
+    class Lexer lexer;
+    class Token currentToken;
+
+    constructor(class CharList source) is
+        class Lexer lexer = new class Lexer(source);
+        this.lexer = lexer;
+        this.currentToken = call lexer.nextToken()
+    end
+
+    void eat(enum token expectedToken) is
+        if this.currentToken.type == expectedToken then
+            #println this.currentToken.value;
+            class Lexer lexer = this.lexer;
+            this.currentToken = call lexer.nextToken()
+        else
+            print "Parser encountered unexpected token: ";
+            println this.currentToken.value;
+            exit 100
+        fi
+    end
+
+    class Program parse() is
+        println "1";
+        class StatementBlock programBody = new class StatementBlock();
+        class FunctionDefinitionList functionList = new class FunctionDefinitionList();
+        println "2";
+
+        call this.eat(TOKEN_BEGIN);
+
+        bool firstStatementParsed = false;
+        println "3";
+        println !firstStatementParsed;
+        println ((
+            this.currentToken.type == TOKEN_INT ||
+            this.currentToken.type == TOKEN_CHAR ||
+            this.currentToken.type == TOKEN_BOOL ||
+            this.currentToken.type == TOKEN_STRING ||
+            this.currentToken.type == TOKEN_PAIR
+        )) ;
+        while (!firstStatementParsed && (
+            this.currentToken.type == TOKEN_INT ||
+            this.currentToken.type == TOKEN_CHAR ||
+            this.currentToken.type == TOKEN_BOOL ||
+            this.currentToken.type == TOKEN_STRING ||
+            this.currentToken.type == TOKEN_PAIR
+        )) do
+            println "4";
+            class Type type = call this.parseType();
+            char[] name = this.currentToken.value;
+            call this.eat(TOKEN_IDENTIFIER);
+            if this.currentToken.type == TOKEN_EQUALS then
+                # Encountered a declaration statement, not a function definition
+                firstStatementParsed = true;
+                class Identifier identifier = new class Identifier(name);
+                call this.eat(TOKEN_EQUALS);
+                class RightSide rightSide = call this.parseRightSide();
+                class Statement declaration = new class Declaration(type, identifier, rightSide);
+                call programBody.add(declaration)
+            else
+                class FunctionDefinition function = call this.parseFunctionDefinition(type, name);
+                call functionList.add(function)
+            fi
+        done;
+
+        if !firstStatementParsed then
+            class Statement statement = call this.parseStatement();
+            call programBody.add(statement)
+        else skip fi;
+        while this.currentToken.type == TOKEN_SEMICOLON do
+            call this.eat(TOKEN_SEMICOLON);
+            class Statement statement = call this.parseStatement();
+            call programBody.add(statement)
+        done;
+
+        call this.eat(TOKEN_END);
+        call this.eat(TOKEN_EOF);
+
+        class FunctionDefinition[] functions = call functionList.asArray();
+        call functionList.destroy();
+        free functionList;
+        class Program program = new class Program(functions, programBody);
+        return program
+    end
+
+    class FunctionDefinition parseFunctionDefinition(class Type returnType, char[] name) is
+        call this.eat(TOKEN_LPAREN);
+        class ParameterList parameterList = new class ParameterList();
+        if this.currentToken.type != TOKEN_RPAREN then
+            class Type parameterType = call this.parseType();
+            class Identifier parameterIdent = call this.parseIdentifier();
+            class Parameter parameter = new class Parameter(parameterType, parameterIdent);
+            call parameterList.add(parameter);
+            while this.currentToken.type == TOKEN_COMMA do
+                call this.eat(TOKEN_COMMA);
+                parameterType = call this.parseType();
+                parameterIdent = call this.parseIdentifier();
+                parameter = new class Parameter(parameterType, parameterIdent);
+                call parameterList.add(parameter)
+            done
+        else skip fi;
+        class Parameter[] parameters = call parameterList.asArray();
+        call parameterList.destroy();
+        free parameterList;
+        call this.eat(TOKEN_RPAREN);
+
+        call this.eat(TOKEN_IS);
+        class StatementBlock body = call this.parseStatementBlock();
+        call this.eat(TOKEN_END);
+
+        class FunctionDefinition function = new class FunctionDefinition(returnType, name, parameters, body);
+
+        bool returnsOrExits = call function.returnsOrExits();
+        if !returnsOrExits then
+            print "Function ";
+            print function.name;
+            println " does not always return or exit";
+            exit 100
+        else return function fi
+    end
+
+    class StatementBlock parseStatementBlock() is
+        class StatementBlock statementBlock = new class StatementBlock();
+
+        class Statement statement = call this.parseStatement();
+        call statementBlock.add(statement);
+
+        while this.currentToken.type == TOKEN_SEMICOLON do
+            call this.eat(TOKEN_SEMICOLON);
+            statement = call this.parseStatement();
+            call statementBlock.add(statement)
+        done;
+
+        return statementBlock
+    end
+
+    class Statement parseStatement() is
+        switch this.currentToken.type matches
+            case TOKEN_SKIP do
+                call this.eat(TOKEN_SKIP);
+                class Statement statement = new class Skip();
+                return statement
+            end
+            case TOKEN_READ do
+                call this.eat(TOKEN_READ);
+                class LeftSide leftSide = call this.parseLeftSide();
+                class ReadInput readInput = new class ReadInput(leftSide);
+                return readInput
+            end
+            case TOKEN_FREE do
+                call this.eat(TOKEN_FREE);
+                class Expression expression = call this.parseExpression();
+                class FreeMemory freeMemory = new class FreeMemory(expression);
+                return freeMemory
+            end
+            case TOKEN_RETURN do
+                call this.eat(TOKEN_RETURN);
+                class Expression expression = call this.parseExpression();
+                class Return returnn = new class Return(expression);
+                return returnn
+            end
+            case TOKEN_EXIT do
+                call this.eat(TOKEN_EXIT);
+                class Expression expression = call this.parseExpression();
+                class Exit exitt = new class Exit(expression);
+                return exitt
+            end
+            case TOKEN_PRINT do
+                call this.eat(TOKEN_PRINT);
+                class Expression expression = call this.parseExpression();
+                class Print printt = new class Print(expression);
+                return printt
+            end
+            case TOKEN_PRINTLN do
+                call this.eat(TOKEN_PRINTLN);
+                class Expression expression = call this.parseExpression();
+                class PrintLine printlnn = new class PrintLine(expression);
+                return printlnn
+            end
+            case TOKEN_BEGIN do
+                call this.eat(TOKEN_BEGIN);
+                class StatementBlock statementBlock = call this.parseStatementBlock();
+                call this.eat(TOKEN_END);
+                return statementBlock
+            end
+            case TOKEN_IF do
+                call this.eat(TOKEN_IF);
+                class Expression condition = call this.parseExpression();
+                call this.eat(TOKEN_THEN);
+                class StatementBlock truBlock = call this.parseStatementBlock();
+                call this.eat(TOKEN_ELSE);
+                class StatementBlock falBlock = call this.parseStatementBlock();
+                call this.eat(TOKEN_FI);
+                class If iff = new class If(condition, truBlock, falBlock);
+                return iff
+            end
+            case TOKEN_WHILE do
+                call this.eat(TOKEN_WHILE);
+                class Expression condition = call this.parseExpression();
+                call this.eat(TOKEN_DO);
+                class StatementBlock loopBody = call this.parseStatementBlock();
+                call this.eat(TOKEN_DONE);
+                class While whilee = new class While(condition, loopBody);
+                return whilee
+            end
+            case TOKEN_INT do class Statement statement = call this.parseDeclaration(); return statement end
+            case TOKEN_CHAR do class Statement statement = call this.parseDeclaration(); return statement end
+            case TOKEN_BOOL do class Statement statement = call this.parseDeclaration(); return statement end
+            case TOKEN_STRING do class Statement statement = call this.parseDeclaration(); return statement end
+            case TOKEN_PAIR do class Statement statement = call this.parseDeclaration(); return statement end
+            default
+                class LeftSide leftSide = call this.parseLeftSide();
+                call this.eat(TOKEN_EQUALS);
+                class RightSide rightSide = call this.parseRightSide();
+                class Assignment assignment = new class Assignment(leftSide, rightSide);
+                return assignment
+        end
+    end
+
+    class Statement parseDeclaration() is
+        class Type type = call this.parseType();
+        class Identifier identifier = call this.parseIdentifier();
+        call this.eat(TOKEN_EQUALS);
+        class RightSide rightSide = call this.parseRightSide();
+        class Declaration declaration = new class Declaration(type, identifier, rightSide);
+        return declaration
+    end
+
+    class Identifier parseIdentifier() is
+        char[] name = this.currentToken.value;
+        call this.eat(TOKEN_IDENTIFIER);
+        class Identifier identifier = new class Identifier(name);
+        return identifier
+    end
+
+    class Type parseType() is
+        class Type type = call this.parseSingleType();
+        while this.currentToken.type == TOKEN_LSQPAREN do
+            call this.eat(TOKEN_LSQPAREN);
+            call this.eat(TOKEN_RSQPAREN);
+            class Type arrayType = new class Type(TYPE_ARRAY);
+            call arrayType.constructArrayType(type);
+            type = arrayType
+        done;
+        return type
+    end
+
+    class Type parseSingleType() is
+        switch this.currentToken.type matches
+            case TOKEN_INT do class Type type = call this.parseBaseType(TOKEN_INT, TYPE_INT); return type end
+            case TOKEN_CHAR do class Type type = call this.parseBaseType(TOKEN_CHAR, TYPE_CHAR); return type end
+            case TOKEN_BOOL do class Type type = call this.parseBaseType(TOKEN_BOOL, TYPE_BOOL); return type end
+            case TOKEN_STRING do class Type type = call this.parseBaseType(TOKEN_STRING, TYPE_STRING); return type end
+            case TOKEN_PAIR do
+                call this.eat(TOKEN_PAIR);
+                call this.eat(TOKEN_LPAREN);
+                class Type leftType = call this.parsePairElemType();
+                call this.eat(TOKEN_COMMA);
+                class Type rightType = call this.parsePairElemType();
+                call this.eat(TOKEN_RPAREN);
+
+                class Type type = new class Type(TYPE_PAIR);
+                call type.constructPairType(leftType, rightType);
+                return type
+            end
+            default
+                println "Parser encountered unexpected token, expected non-array type";
+                exit 100
+        end
+    end
+
+    class Type parsePairElemType() is
+        class Type type = call this.parseSinglePairElemType();
+        while this.currentToken.type == TOKEN_LSQPAREN do
+            call this.eat(TOKEN_LSQPAREN);
+            call this.eat(TOKEN_RSQPAREN);
+            class Type arrayType = new class Type(TYPE_ARRAY);
+            call arrayType.constructArrayType(type);
+            type = arrayType
+        done;
+        return type
+    end
+
+    class Type parseSinglePairElemType() is
+        switch this.currentToken.type matches
+            case TOKEN_INT do class Type type = call this.parseBaseType(TOKEN_INT, TYPE_INT); return type end
+            case TOKEN_CHAR do class Type type = call this.parseBaseType(TOKEN_CHAR, TYPE_CHAR); return type end
+            case TOKEN_BOOL do class Type type = call this.parseBaseType(TOKEN_BOOL, TYPE_BOOL); return type end
+            case TOKEN_STRING do class Type type = call this.parseBaseType(TOKEN_STRING, TYPE_STRING); return type end
+            case TOKEN_PAIR do
+                call this.eat(TOKEN_PAIR);
+                class Type type = new class Type(TYPE_PAIR);
+                class Type leftType = new class Type(TYPE_ANY);
+                class Type rightType = new class Type(TYPE_ANY);
+                call type.constructPairType(leftType, rightType);
+                return type
+            end
+            default
+                println "Parser encountered unexpected token, expected non-array type in pair";
+                exit 100
+        end
+    end
+
+    class Type parseBaseType(enum token token, enum type baseType) is
+        call this.eat(token);
+        class Type type = new class Type(baseType);
+        return type
+    end
+
+    class RightSide parseRightSide() is
+        switch this.currentToken.type matches
+            case TOKEN_CALL do
+                call this.eat(TOKEN_CALL);
+                char[] functionName = this.currentToken.value;
+                call this.eat(TOKEN_IDENTIFIER);
+                call this.eat(TOKEN_LPAREN);
+                class ExpressionList argumentList = new class ExpressionList();
+                if this.currentToken.type != TOKEN_RPAREN then
+                    class Expression argument = call this.parseExpression();
+                    call argumentList.add(argument);
+                    while this.currentToken.type == TOKEN_COMMA do
+                        call this.eat(TOKEN_COMMA);
+                        argument = call this.parseExpression();
+                        call argumentList.add(argument)
+                    done
+                else skip fi;
+                call this.eat(TOKEN_RPAREN);
+                class Expression[] arguments = call argumentList.asArray();
+                class FunctionCall functionCall = new class FunctionCall(functionName, arguments);
+                call argumentList.destroy();
+                free argumentList;
+                return functionCall
+            end
+            case TOKEN_NEWPAIR do
+                call this.eat(TOKEN_NEWPAIR);
+                call this.eat(TOKEN_LPAREN);
+                class Expression firstExpression = call this.parseExpression();
+                call this.eat(TOKEN_COMMA);
+                class Expression secondExpression = call this.parseExpression();
+                call this.eat(TOKEN_RPAREN);
+                class NewPair newPair = new class NewPair(firstExpression, secondExpression);
+                return newPair
+            end
+            case TOKEN_LSQPAREN do
+                call this.eat(TOKEN_LSQPAREN);
+                class ExpressionList elementList = new class ExpressionList();
+                if this.currentToken.type != TOKEN_RSQPAREN then
+                    class Expression element = call this.parseExpression();
+                    call elementList.add(element);
+                    while this.currentToken.type == TOKEN_COMMA do
+                        call this.eat(TOKEN_COMMA);
+                        element = call this.parseExpression();
+                        call elementList.add(element)
+                    done
+                else skip fi;
+                call this.eat(TOKEN_RSQPAREN);
+                class Expression[] elements = call elementList.asArray();
+                class ArrayLiteral arrayLiteral = new class ArrayLiteral(elements);
+                call elementList.destroy();
+                free elementList;
+                return arrayLiteral
+            end
+            case TOKEN_FST do class LeftSide pairElem = call this.parseLeftSide(); return pairElem end
+            case TOKEN_SND do class LeftSide pairElem = call this.parseLeftSide(); return pairElem end
+            default
+                class Expression expression = call this.parseExpression();
+                return expression
+        end
+    end
+
+    class LeftSide parseLeftSide() is
+        switch this.currentToken.type matches
+            case TOKEN_IDENTIFIER do
+                char[] name = this.currentToken.value;
+                call this.eat(TOKEN_IDENTIFIER);
+
+                if this.currentToken.type == TOKEN_LSQPAREN then
+                    class Identifier identifier = new class Identifier(name);
+                    class ExpressionList indexList = new class ExpressionList();
+                    while this.currentToken.type == TOKEN_LSQPAREN do
+                        call this.eat(TOKEN_LSQPAREN);
+                        class Expression index = call this.parseExpression();
+                        call indexList.add(index);
+                        call this.eat(TOKEN_RSQPAREN)
+                    done;
+                    class Expression[] indices = call indexList.asArray();
+                    class ArrayElement arrayElement = new class ArrayElement(identifier, indices);
+                    call indexList.destroy();
+                    free indexList;
+                    return arrayElement
+                else
+                    class Identifier identifier = new class Identifier(name);
+                    return identifier
+                fi
+            end
+            case TOKEN_FST do
+                call this.eat(TOKEN_FST);
+                if this.currentToken.type == TOKEN_NULL then
+                    println "Cannot dereference null pair";
+                    exit 100
+                else skip fi;
+                class LeftSide leftSide = call this.parseLeftSide();
+                class PairFirst pairFirst = new class PairFirst(leftSide);
+                return pairFirst
+            end
+            case TOKEN_SND do
+                call this.eat(TOKEN_SND);
+                if this.currentToken.type == TOKEN_NULL then
+                    println "Cannot dereference null pair";
+                    exit 100
+                else skip fi;
+                class LeftSide leftSide = call this.parseLeftSide();
+                class PairSecond pairSecond = new class PairSecond(leftSide);
+                return pairSecond
+            end
+            default
+                println "Parser encountered unexpected token, expected assignment left side";
+                exit 100
+        end
+    end
+
+    class Expression parseExpression() is
+        class Expression atom = call this.parseAtom();
+        class Expression expression = call this.parseExpression1(atom, 0);
+        return expression
+    end
+
+    # Precedence climbing expression parser
+    class Expression parseExpression1(class Expression leftArg, int minPrecedence) is
+        enum token lookahead = this.currentToken.type;
+        int opPrec = 0;
+        int lookaheadPrec = call this.precedence(lookahead);
+        enum associativity lookaheadAssoc = call this.associativity(lookahead);
+        while lookaheadPrec >= minPrecedence do
+            enum token op = lookahead;
+            opPrec = call this.precedence(op);
+            call this.eat(op);
+            class Expression rightArg = call this.parseAtom();
+            lookahead = this.currentToken.type;
+            lookaheadPrec = call this.precedence(lookahead);
+            lookaheadAssoc = call this.associativity(lookahead);
+            
+            while (lookaheadPrec > opPrec) || (lookaheadPrec == opPrec && lookaheadAssoc == ASSOC_RIGHT) do
+                int nextMinPrec = opPrec;
+                if lookaheadPrec > opPrec then nextMinPrec = nextMinPrec + 1 else skip fi;
+                rightArg = call this.parseExpression1(rightArg, nextMinPrec);
+                lookahead = this.currentToken.type;
+                lookaheadPrec = call this.precedence(lookahead);
+                lookaheadAssoc = call this.associativity(lookahead)
+            done;
+
+            leftArg = call this.parseBinaryOperation(op, leftArg, rightArg)
+        done;
+        return leftArg
+    end
+
+    class BinaryOperation parseBinaryOperation(enum token opToken, class Expression left, class Expression right) is
+        enum binaryOperator op = -1;
+        switch opToken matches
+            case TOKEN_STAR do op = BINOP_MULTIPLY end
+            case TOKEN_SLASH do op = BINOP_DIVIDE end
+            case TOKEN_PERCENT do op = BINOP_MODULO end
+            case TOKEN_PLUS do op = BINOP_ADD end
+            case TOKEN_MINUS do op = BINOP_SUBTRACT end
+            case TOKEN_GTT do op = BINOP_GTT end
+            case TOKEN_GEQ do op = BINOP_GEQ end
+            case TOKEN_LST do op = BINOP_LST end
+            case TOKEN_LEQ do op = BINOP_LEQ end
+            case TOKEN_EQT do op = BINOP_EQT end
+            case TOKEN_NEQ do op = BINOP_NEQ end
+            case TOKEN_AND do op = BINOP_AND end
+            case TOKEN_OR do op = BINOP_OR end
+            default
+                println "Parser encountered unexpected token, expected binary operator";
+                exit 100
+        end;
+        class BinaryOperation binOp = new class BinaryOperation(op, left, right);
+        return binOp
+    end
+
+    int precedence(enum token operator) is
+        switch operator matches
+            case TOKEN_STAR do return 6 end
+            case TOKEN_SLASH do return 6 end
+            case TOKEN_PERCENT do return 6 end
+
+            case TOKEN_PLUS do return 5 end
+            case TOKEN_MINUS do return 5 end
+            
+            case TOKEN_GTT do return 4 end
+            case TOKEN_GEQ do return 4 end
+            case TOKEN_LST do return 4 end
+            case TOKEN_LEQ do return 4 end
+
+            case TOKEN_EQT do return 3 end
+            case TOKEN_NEQ do return 3 end
+
+            case TOKEN_AND do return 2 end
+
+            case TOKEN_OR do return 1 end
+
+            default return -1
+        end
+    end
+
+    enum associativity associativity(enum token operator) is
+        switch operator matches
+            case TOKEN_STAR do return ASSOC_LEFT end
+            case TOKEN_SLASH do return ASSOC_LEFT end
+            case TOKEN_PERCENT do return ASSOC_LEFT end
+            case TOKEN_PLUS do return ASSOC_LEFT end
+            case TOKEN_MINUS do return ASSOC_LEFT end
+            
+            case TOKEN_GTT do return ASSOC_NONE end
+            case TOKEN_GEQ do return ASSOC_NONE end
+            case TOKEN_LST do return ASSOC_NONE end
+            case TOKEN_LEQ do return ASSOC_NONE end
+            case TOKEN_EQT do return ASSOC_NONE end
+            case TOKEN_NEQ do return ASSOC_NONE end
+
+            case TOKEN_AND do return ASSOC_RIGHT end
+            case TOKEN_OR do return ASSOC_RIGHT end
+
+            default return ASSOC_NONE
+        end
+    end
+
+    class Expression parseAtom() is
+        switch this.currentToken.type matches
+            case TOKEN_LPAREN do
+                call this.eat(TOKEN_LPAREN);
+                class Expression expression = call this.parseExpression();
+                call this.eat(TOKEN_RPAREN);
+                return expression
+            end
+            case TOKEN_MINUS do
+                call this.eat(TOKEN_MINUS);
+                if this.currentToken.type == TOKEN_INT_LITER then
+                    class Integer integer = call this.parseIntegerLiteral(true);
+                    return integer
+                else
+                    class UnaryOperation unOp = call this.parseUnaryOperation(UNOP_NEGATE);
+                    return unOp
+                fi
+            end
+            case TOKEN_BANG do
+                call this.eat(TOKEN_BANG);
+                class UnaryOperation unOp = call this.parseUnaryOperation(UNOP_NOT);
+                return unOp
+            end
+            case TOKEN_LEN do
+                call this.eat(TOKEN_LEN);
+                class UnaryOperation unOp = call this.parseUnaryOperation(UNOP_LEN);
+                return unOp
+            end
+            case TOKEN_ORD do
+                call this.eat(TOKEN_ORD);
+                class UnaryOperation unOp = call this.parseUnaryOperation(UNOP_ORD);
+                return unOp
+            end
+            case TOKEN_CHR do
+                call this.eat(TOKEN_CHR);
+                class UnaryOperation unOp = call this.parseUnaryOperation(UNOP_CHR);
+                return unOp
+            end
+            case TOKEN_IDENTIFIER do
+                char[] name = this.currentToken.value;
+                call this.eat(TOKEN_IDENTIFIER);
+
+                if this.currentToken.type == TOKEN_LSQPAREN then
+                    class Identifier identifier = new class Identifier(name);
+                    class ExpressionList indexList = new class ExpressionList();
+                    while this.currentToken.type == TOKEN_LSQPAREN do
+                        call this.eat(TOKEN_LSQPAREN);
+                        class Expression index = call this.parseExpression();
+                        call indexList.add(index);
+                        call this.eat(TOKEN_RSQPAREN)
+                    done;
+                    class Expression[] indices = call indexList.asArray();
+                    class ExpressionArrayElement arrayElement = new class ExpressionArrayElement(identifier, indices);
+                    call indexList.destroy();
+                    free indexList;
+                    return arrayElement
+                else
+                    class ExpressionIdentifier identifier = new class ExpressionIdentifier(name);
+                    return identifier
+                fi
+            end
+            case TOKEN_INT_LITER do
+                class Integer integer = call this.parseIntegerLiteral(false);
+                return integer
+            end
+            case TOKEN_PLUS do
+                call this.eat(TOKEN_PLUS);
+                class Integer integer = call this.parseIntegerLiteral(false);
+                return integer
+            end
+            case TOKEN_CHAR_LITER do
+                class Character character = new class Character(this.currentToken.value[0]);
+                call this.eat(TOKEN_CHAR_LITER);
+                return character
+            end
+            case TOKEN_STR_LITER do
+                class String str = new class String(this.currentToken.value);
+                call this.eat(TOKEN_STR_LITER);
+                return str
+            end
+            case TOKEN_TRUE do
+                class Boolean boolean = new class Boolean(true);
+                call this.eat(TOKEN_TRUE);
+                return boolean
+            end
+            case TOKEN_FALSE do
+                class Boolean boolean = new class Boolean(false);
+                call this.eat(TOKEN_FALSE);
+                return boolean
+            end
+            case TOKEN_NULL do
+                class NullPair nullPair = new class NullPair();
+                call this.eat(TOKEN_NULL);
+                return nullPair
+            end
+            default
+                println this.currentToken.value;
+                println "Parser encountered unexpected token, expected atom";
+                exit 100
+        end
+    end
+
+    class UnaryOperation parseUnaryOperation(enum unaryOperator op) is
+        class Expression expression = call this.parseAtom();
+        class UnaryOperation unOp = new class UnaryOperation(op, expression);
+        return unOp
+    end
+
+    class Integer parseIntegerLiteral(bool negative) is
+        char[] digits = this.currentToken.value;
+        call this.eat(TOKEN_INT_LITER);
+        int digit = call digitToInt(digits[0]);
+        if negative then digit = -digit else skip fi;
+        class Integer integer = new class Integer(digit);
+        for i = 1 to len digits do
+            digit = call digitToInt(digits[i]);
+
+            if !negative then
+                if (integer.value > 214748364) || ((integer.value == 214748364) && (digit > 7)) then
+                    println "Integer literal too large";
+                    exit 100
+                else
+                    integer.value = (integer.value * 10) + digit
+                fi
+            else
+                if (integer.value < -214748364) || ((integer.value == -214748364) && (digit > 8)) then
+                    println "Integer literal too large";
+                    exit 100
+                else
+                    integer.value = (integer.value * 10) - digit
+                fi
+            fi
+        done;
+        return integer
+    end
+
+end
+
+begin skip end

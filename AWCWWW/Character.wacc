@@ -1,0 +1,21 @@
+begin
+    bool isDigit(char c) is
+        return ('0' <= c && c <= '9')
+    end
+
+    bool isAlpha(char c) is
+        return ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z')
+    end
+
+    int digitToInt(char c) is
+        bool isDigit = call isDigit(c);
+        if isDigit then
+            return (ord c) - (ord '0')
+        else
+            println "Attempted to convert non-digit character to integer";
+            exit 1
+        fi
+    end
+
+    skip
+end

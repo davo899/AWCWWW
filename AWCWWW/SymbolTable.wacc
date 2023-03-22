@@ -1,0 +1,286 @@
+import AST.wacc
+
+class SymbolTable contains
+    class SymbolTypes symbolTypes;
+    class OccurenceTables occurenceTables;
+    constructor() is
+        this.symbolTypes = new class SymbolTypes();
+        this.occurenceTables = new class OccurenceTables()
+    end
+
+    void enterScope() is
+        class OccurenceTables occurenceTables = this.occurenceTables;
+        class OccurenceMap occurenceMap = new class OccurenceMap();
+        call occurenceTables.push(occurenceMap)
+    end
+
+    void exitScope() is
+        class OccurenceTables occurenceTables = this.occurenceTables;
+        call occurenceTables.pop()
+    end
+
+    int declare(class Type type, class Identifier ident) is
+        class OccurenceTables occurenceTables = this.occurenceTables;
+        class OccurenceMap top = call occurenceTables.top();
+        pair(char[], int) occurence = call top.lookup(ident.name);
+        if occurence != null then
+            print "Variable ";
+            print ident.name;
+            println " already declared in this scope";
+            exit 200
+        else
+            class SymbolTypes symbolTypes = this.symbolTypes;
+            pair(char[], class TypeList) symbolInfo = call symbolTypes.lookup(ident.name);
+            if symbolInfo == null then
+                class TypeList typeList = new class TypeList();
+                call symbolTypes.put(ident.name, typeList);
+                symbolInfo = call symbolTypes.lookup(ident.name)
+            else skip fi;
+
+            class TypeList typeList = snd symbolInfo;
+            call top.put(ident.name, typeList.length);
+            ident.occurence = typeList.length;
+            call typeList.add(type);
+            return ident.occurence
+        fi
+    end
+
+    int getOccurenceOf(char[] symbol) is
+        class OccurenceTables occurenceTables = this.occurenceTables;
+        int occurence = call occurenceTables.getOccurenceOf(symbol);
+        return occurence
+    end
+
+    class Type getSymbolType(char[] name, int occurence) is
+        class SymbolTypes symbolTypes = this.symbolTypes;
+        pair(char[], class TypeList) types = call symbolTypes.lookup(name);
+        if types == null then
+            print "Variable ";
+            print name;
+            println " not defined";
+            exit 200
+        else
+            class TypeList typeList = snd types;
+            class Type type = call typeList.get(occurence);
+            return type
+        fi
+    end
+end
+
+class SymbolTypes contains
+    pair(char[], class TypeList)[] array;
+    int length;
+
+    constructor() is
+        this.length = 0;
+        this.array = newarray(1)
+    end
+
+    pair(char[], class TypeList) lookup(char[] symbol) is
+        for i = 0 to this.length do
+            pair(char[], class TypeList) p = this.array[i];
+            char[] s = fst p;
+            bool match = call charArrayEqualsCharArray(s, symbol);
+            if match then return p else skip fi
+        done;
+        return null
+    end
+
+    void put(char[] symbol, class TypeList type) is
+        pair(char[], class TypeList) existing = call this.lookup(symbol);
+        if existing != null then
+            snd existing = type
+        else
+            pair(char[], class TypeList) p = newpair(symbol, type);
+            if this.length == len this.array then
+                pair(char[], class TypeList)[] nextArray = newarray(this.length * 2);
+                for i = 0 to this.length do nextArray[i] = this.array[i] done;
+                free this.array;
+                this.array = nextArray
+            else skip fi;
+
+            this.array[this.length] = p;
+            this.length = this.length + 1
+        fi
+    end
+
+    pair(char[], class TypeList)[] asArray() is
+        pair(char[], class TypeList)[] array = newarray(this.length);
+        for i = 0 to this.length do
+            array[i] = this.array[i]
+        done;
+        return array
+    end
+
+    void destroy() is
+        free this.array
+    end
+
+end
+
+class TypeList contains
+    class Type[] array;
+    int length;
+
+    constructor() is
+        this.length = 0;
+        this.array = newarray(1)
+    end
+
+    void add(class Type type) is
+        if this.length == len this.array then
+            class Type[] nextArray = newarray(this.length * 2);
+            for i = 0 to this.length do nextArray[i] = this.array[i] done;
+            free this.array;
+            this.array = nextArray;
+        skip else skip fi;
+
+        this.array[this.length] = type;
+        this.length = this.length + 1
+    end
+
+    class Type[] asArray() is
+        class Type[] array = newarray(this.length);
+        for i = 0 to this.length do
+            array[i] = this.array[i]
+        done;
+        return array
+    end
+
+    class Type get(int i) is
+        if i < 0 || i >= this.length then
+            println "TypeList.get(i) error: Index out of bounds";
+            exit 1
+        else
+            return this.array[i]
+        fi
+    end
+
+    void destroy() is
+        free this.array
+    end
+
+end
+
+class OccurenceTables contains
+    class OccurenceMap[] array;
+    int length;
+
+    constructor() is
+        this.length = 0;
+        this.array = newarray(1)
+    end
+
+    int getOccurenceOf(char[] symbol) is
+        for i = 0 to this.length do
+            class OccurenceMap occurenceMap = this.array[this.length - i - 1];
+            pair(char[], int) occurence = call occurenceMap.lookup(symbol);
+            if occurence != null then
+                int n = snd occurence;
+                return n
+            else skip fi
+        done;
+
+        print "Variable ";
+        print symbol;
+        println " not defined";
+        exit 200
+    end
+
+    void push(class OccurenceMap c) is
+        if this.length == len this.array then
+            class OccurenceMap[] nextArray = newarray(this.length * 2);
+            for i = 0 to this.length do nextArray[i] = this.array[i] done;
+            free this.array;
+            this.array = nextArray;
+        skip else skip fi;
+
+        this.array[this.length] = c;
+        this.length = this.length + 1
+    end
+
+    void pop() is
+        if this.length == 0 then
+            println "OccurenceTables popped empty stack";
+            exit 1
+        else skip fi;
+        this.length = this.length - 1;
+        class OccurenceMap popped = this.array[this.length];
+        call popped.destroy();
+        free popped
+    end
+
+    class OccurenceMap top() is
+        if this.length == 0 then
+            println "OccurenceTables peeked empty stack";
+            exit 1
+        else skip fi;
+        return this.array[this.length - 1]
+    end
+
+    class OccurenceMap[] asArray() is
+        class OccurenceMap[] array = newarray(this.length);
+        for i = 0 to this.length do
+            array[i] = this.array[i]
+        done;
+        return array
+    end
+
+    void destroy() is
+        free this.array
+    end
+
+end
+
+class OccurenceMap contains
+    pair(char[], int)[] array;
+    int length;
+
+    constructor() is
+        this.length = 0;
+        this.array = newarray(1)
+    end
+
+    pair(char[], int) lookup(char[] symbol) is
+        for i = 0 to this.length do
+            pair(char[], int) p = this.array[i];
+            char[] s = fst p;
+            bool match = call charArrayEqualsCharArray(s, symbol);
+            if match then return p else skip fi
+        done;
+        return null
+    end
+
+    void put(char[] symbol, int occurence) is
+        pair(char[], int) existing = call this.lookup(symbol);
+        if existing != null then
+            snd existing = occurence
+        else
+            pair(char[], int) p = newpair(symbol, occurence);
+            if this.length == len this.array then
+                pair(char[], int)[] nextArray = newarray(this.length * 2);
+                for i = 0 to this.length do nextArray[i] = this.array[i] done;
+                free this.array;
+                this.array = nextArray
+            else skip fi;
+
+            this.array[this.length] = p;
+            this.length = this.length + 1
+        fi
+    end
+
+    pair(char[], int)[] asArray() is
+        pair(char[], int)[] array = newarray(this.length);
+        for i = 0 to this.length do
+            array[i] = this.array[i]
+        done;
+        return array
+    end
+
+    void destroy() is
+        free this.array
+    end
+
+end
+
+begin skip end

@@ -1,0 +1,18 @@
+begin
+    void fileWriteString(file f, string s) is   
+        char* head = s;
+        int i = 0;
+        while *(head + i) != '\0' do
+            fwrite f, *(head + i);
+            i = i + 1
+        done
+    end
+
+    void fileWriteCharArray(file f, char[] cs) is   
+        for i = 0 to len cs do
+            fwrite f, cs[i]
+        done
+    end
+
+    skip
+end

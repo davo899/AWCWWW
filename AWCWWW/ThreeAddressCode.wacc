@@ -1,0 +1,817 @@
+import AST.wacc
+import ARM.wacc
+import String.wacc
+
+enum stackLocation contains
+    STACK_LOCAL, STACK_ARGS
+end
+
+enum wordSize contains
+    WORD_FULL, WORD_BYTE
+end
+
+enum readType contains
+    READ_INT, READ_CHAR
+end
+
+enum printType contains
+    PRINT_INT, PRINT_BOOL, PRINT_CHAR, PRINT_STRING, PRINT_REFERENCE, PRINT_CHAR_ARRAY
+end
+
+class TACGenerator contains
+    class TACList programTAC;
+    class StringList strings;
+
+    int stackLocalIndex;
+    int tempIndex;
+    int labelIndex;
+
+    class Parameter[] paramList;
+
+    bool arrayIndexChecksAreMade;
+    bool nullDerefenceChecksAreMade;
+    bool overflowChecksAreMade;
+    bool divideByZeroChecksAreMade;
+
+    constructor() is
+        this.programTAC = new class TACList();
+        this.strings = new class StringList();
+        this.stackLocalIndex = -1;
+        this.tempIndex = -1;
+        this.labelIndex = -1;
+        this.paramList = [];
+        this.arrayIndexChecksAreMade = false;
+        this.nullDerefenceChecksAreMade = false;
+        this.overflowChecksAreMade = false;
+        this.divideByZeroChecksAreMade = false
+    end
+
+    void add(class TACLine line) is
+        class TACList programTAC = this.programTAC;
+        call programTAC.add(line)
+    end
+
+    int addString(char[] s) is
+        class StringList strings = this.strings;
+        call strings.add(s);
+        return this.strings.length - 1
+    end
+
+    char[][] getStrings() is
+        class StringList stringList = this.strings;
+        char[][] strings = call stringList.asArray();
+        return strings
+    end
+
+    class Temp currentTemp() is
+        class Temp temp = new class Temp(this.tempIndex, STACK_LOCAL, this.stackLocalIndex);
+        return temp
+    end
+
+    class Temp nextTemp() is
+        this.tempIndex = this.tempIndex + 1;
+        this.stackLocalIndex = this.stackLocalIndex + 1;
+        class Temp temp = new class Temp(this.tempIndex, STACK_LOCAL, this.stackLocalIndex);
+        return temp
+    end
+
+    class TACLabel nextLabel() is
+        this.labelIndex = this.labelIndex + 1;
+        class TACLabel label = new class TACLabel(this.labelIndex);
+        return label
+    end
+
+    char[] mangledFunctionName(char[] name) is
+        char[] mangled = newarray(len name + 5);
+        mangled[0] = 'w';
+        mangled[1] = 'a';
+        mangled[2] = 'c';
+        mangled[3] = 'c';
+        mangled[4] = '_';
+        for i = 0 to len name do
+            mangled[i + 5] = name[i]
+        done;
+        return mangled
+    end
+
+    class TACLeftSide resolveIdentifier(char[] name, int occurence) is
+        char[] varName = call this.mangledIdentifier(name, occurence);
+        for i = 0 to len this.paramList do
+            class Parameter parameter = this.paramList[i];
+            bool match = call charArrayEqualsCharArray(parameter.ident.name, name);
+            if match && parameter.ident.occurence == occurence then
+                class Variable functionArgument = new class Variable(varName, STACK_ARGS, i);
+                return functionArgument
+            else skip fi
+        done;
+        this.stackLocalIndex = this.stackLocalIndex + 1;
+        class Variable variable = new class Variable(varName, STACK_LOCAL, this.stackLocalIndex);
+        return variable
+    end
+
+    char[] mangledIdentifier(char[] name, int occurence) is
+        class CharList charList = new class CharList();
+        call charList.addPositiveInteger(occurence);
+        for i = 0 to len name do
+            call charList.add(name[i])
+        done;
+        char[] varName = call charList.asArray();
+        call charList.destroy();
+        free charList;
+        return varName
+    end
+
+end
+
+class TACList contains
+    class TACLine[] array;
+    int length;
+
+    constructor() is
+        this.length = 0;
+        this.array = newarray(1)
+    end
+
+    void add(class TACLine line) is
+        if this.length == len this.array then
+            class TACLine[] nextArray = newarray(this.length * 2);
+            for i = 0 to this.length do nextArray[i] = this.array[i] done;
+            free this.array;
+            this.array = nextArray
+        else skip fi;
+
+        this.array[this.length] = line;
+        this.length = this.length + 1
+    end
+
+    class TACLine[] asArray() is
+        class TACLine[] array = newarray(this.length);
+        for i = 0 to this.length do
+            array[i] = this.array[i]
+        done;
+        return array
+    end
+
+    class TACLine get(int i) is
+        if i < 0 || i >= this.length then
+            println "TACList.get(i) error: Index out of bounds";
+            exit 1
+        else
+            return this.array[i]
+        fi
+    end
+
+    void clear() is
+        this.length = 0
+    end
+
+    void destroy() is
+        free this.array
+    end
+
+end
+
+class StringList contains
+    char[][] array;
+    int length;
+
+    constructor() is
+        this.length = 0;
+        this.array = newarray(1)
+    end
+
+    void add(char[] str) is
+        if this.length == len this.array then
+            char[][] nextArray = newarray(this.length * 2);
+            for i = 0 to this.length do nextArray[i] = this.array[i] done;
+            free this.array;
+            this.array = nextArray
+        else skip fi;
+
+        this.array[this.length] = str;
+        this.length = this.length + 1
+    end
+
+    char[][] asArray() is
+        char[][] array = newarray(this.length);
+        for i = 0 to this.length do
+            array[i] = this.array[i]
+        done;
+        return array
+    end
+
+    char[] get(int i) is
+        if i < 0 || i >= this.length then
+            println "StringList.get(i) error: Index out of bounds";
+            exit 1
+        else
+            return this.array[i]
+        fi
+    end
+
+    void destroy() is
+        free this.array
+    end
+
+end
+
+class TACLine contains
+    void translateToARM(class ARMGenerator armGenerator) is skip end
+end
+class EnterMainFunction extends TACLine contains
+    void translateToARM(class ARMGenerator armGenerator) is
+        enum register[] fplr = [R_FRAME_POINTER, R_LINK_REGISTER];
+        class Push pushFPLR = new class Push(fplr);
+        class Push pushSaved = new class Push(armGenerator.functionRegisters);
+        char[] main = call stringToCharArray("main");
+        class ARMLabel label = new class ARMLabel(main);
+        class Push pushMain = new class Push(armGenerator.mainPushPop);
+        class Register sp = new class Register(R_STACK_POINTER);
+        class MOV movFPSP = new class MOV(R_FRAME_POINTER, sp, COND_AL, false);
+
+        call armGenerator.add(label);
+        call armGenerator.add(pushFPLR);
+        call armGenerator.add(pushMain);
+        call armGenerator.add(pushSaved);
+        call armGenerator.add(movFPSP)
+    end
+end
+class ExitMainFunction extends TACLine contains
+    void translateToARM(class ARMGenerator armGenerator) is
+        enum register[] fppc = [R_FRAME_POINTER, R_PROGRAM_COUNTER];
+        class Pop popFPPC = new class Pop(fppc);
+        class Pop popSaved = new class Pop(armGenerator.functionRegisters);
+        class Pop popMain = new class Pop(armGenerator.mainPushPop);
+        class Register fp = new class Register(R_FRAME_POINTER);
+        class MOV movSPFP = new class MOV(R_STACK_POINTER, fp, COND_AL, false);
+        class Immediate zero = new class Immediate(0);
+        class MOV returnn = new class MOV(R0, zero, COND_AL, false);
+
+        call armGenerator.add(returnn);
+        call armGenerator.add(movSPFP);
+        call armGenerator.add(popSaved);
+        call armGenerator.add(popMain);
+        call armGenerator.add(popFPPC)
+    end
+end
+class EnterSubroutine extends TACLine contains
+    char[] name;
+    constructor(char[] name) is
+        this.name = name
+    end
+
+    void translateToARM(class ARMGenerator armGenerator) is
+        enum register[] fplr = [R_FRAME_POINTER, R_LINK_REGISTER];
+        class Push pushFPLR = new class Push(fplr);
+        class Push pushSaved = new class Push(armGenerator.functionRegisters);
+        class ARMLabel label = new class ARMLabel(this.name);
+        class Register sp = new class Register(R_STACK_POINTER);
+        class MOV movFPSP = new class MOV(R_FRAME_POINTER, sp, COND_AL, false);
+
+        call armGenerator.add(label);
+        call armGenerator.add(pushFPLR);
+        call armGenerator.add(pushSaved);
+        call armGenerator.add(movFPSP)
+    end
+end
+class ReturnFromSubroutine extends TACLine contains
+    void translateToARM(class ARMGenerator armGenerator) is
+        enum register[] fppc = [R_FRAME_POINTER, R_PROGRAM_COUNTER];
+        class Pop popFPPC = new class Pop(fppc);
+        class Pop popSaved = new class Pop(armGenerator.functionRegisters);
+        class Register fp = new class Register(R_FRAME_POINTER);
+        class MOV movSPFP = new class MOV(R_STACK_POINTER, fp, COND_AL, false);
+
+        call armGenerator.add(movSPFP);
+        call armGenerator.add(popSaved);
+        call armGenerator.add(popFPPC)
+    end
+end
+class JumpToSubroutine extends TACLine contains
+    char[] name;
+    constructor(char[] name) is
+        this.name = name
+    end
+    
+    void translateToARM(class ARMGenerator armGenerator) is
+        class BL jump = new class BL(this.name, COND_AL);
+        call armGenerator.add(jump)
+    end
+end
+class PushStackSpace extends TACLine contains
+    int space;
+    constructor(int space) is
+        this.space = space
+    end
+    
+    void translateToARM(class ARMGenerator armGenerator) is
+        if this.space <= 255 then
+            class Immediate shift = new class Immediate(this.space * 4);
+            class SUB sub = new class SUB(R_STACK_POINTER, R_STACK_POINTER, shift, COND_AL, false);
+            call armGenerator.add(sub)
+        else
+            class DataWordInt shift = new class DataWordInt(this.space * 4);
+            class LDR ldr = new class LDR(armGenerator.leftRegister, shift, COND_AL, WORD_FULL);
+            call armGenerator.add(ldr);
+            class Register leftReg = new class Register(armGenerator.leftRegister);
+            class SUB sub = new class SUB(R_STACK_POINTER, R_STACK_POINTER, leftReg, COND_AL, false);
+            call armGenerator.add(sub)
+        fi
+    end
+end
+class Assign extends TACLine contains
+    class TACLeftSide left;
+    class TACRightSide right;
+    constructor(class TACLeftSide left, class TACRightSide right) is
+        this.left = left;
+        this.right = right
+    end
+    
+    void translateToARM(class ARMGenerator armGenerator) is
+        class TACLeftSide left = this.left;
+        class TACRightSide right = this.right;
+        call right.loadInto(armGenerator, armGenerator.leftRegister);
+        call left.storeFrom(armGenerator, armGenerator.leftRegister)
+    end
+end
+class WriteTo extends TACLine contains
+    class TACLeftSide left;
+    class Argument offset;
+    class Argument argument;
+    enum wordSize size;
+    constructor(class TACLeftSide left, class Argument argument, class Argument offset, enum wordSize size) is
+        this.left = left;
+        this.argument = argument;
+        this.offset = offset;
+        this.size = size
+    end
+    
+    void translateToARM(class ARMGenerator armGenerator) is
+        class TACLeftSide left = this.left;
+        class Argument offset = this.offset;
+        class Argument argument = this.argument;
+        
+        call argument.loadInto(armGenerator, armGenerator.leftRegister);
+        call left.loadInto(armGenerator, armGenerator.rightRegister);
+        call offset.loadInto(armGenerator, armGenerator.offsetRegister);
+
+        class RegisterOffset regOff = new class RegisterOffset(armGenerator.rightRegister, armGenerator.offsetRegister);
+        class STR str = new class STR(armGenerator.leftRegister, regOff, COND_AL, this.size);
+        call armGenerator.add(str)
+    end
+end
+class TACLabel extends TACLine contains
+    int id;
+    constructor(int id) is
+        this.id = id
+    end
+    
+    void translateToARM(class ARMGenerator armGenerator) is
+        class CharList charList = new class CharList();
+        call charList.add('L');
+        call charList.addPositiveInteger(this.id);
+        char[] labelName = call charList.asArray();
+        call charList.destroy();
+        free charList;
+        class ARMLabel label = new class ARMLabel(labelName);
+        call armGenerator.add(label)
+    end
+end
+class StoreReturnValue extends TACLine contains
+    class Argument argument;
+    constructor(class Argument argument) is
+        this.argument = argument
+    end
+    
+    void translateToARM(class ARMGenerator armGenerator) is
+        class Argument argument = this.argument;
+        call argument.loadInto(armGenerator, armGenerator.returnRegister)
+    end
+end
+class AddParameter extends TACLine contains
+    class Argument argument;
+    constructor(class Argument argument) is
+        this.argument = argument
+    end
+    
+    void translateToARM(class ARMGenerator armGenerator) is
+        enum register[] left = [armGenerator.leftRegister];
+        class Push pushLeft = new class Push(left);
+        class Argument argument = this.argument;
+        call argument.loadInto(armGenerator, armGenerator.leftRegister);
+        call armGenerator.add(pushLeft)
+    end
+end
+class TACExit extends TACLine contains
+    class Argument argument;
+    constructor(class Argument argument) is
+        this.argument = argument
+    end
+    
+    void translateToARM(class ARMGenerator armGenerator) is
+        char[] exitLabel = call stringToCharArray("exit");
+        class BL exitt = new class BL(exitLabel, COND_AL);
+        class Argument argument = this.argument;
+        call argument.loadInto(armGenerator, R0);
+        call armGenerator.add(exitt)
+    end
+end
+class TACFree extends TACLine contains
+    class Argument argument;
+    constructor(class Argument argument) is
+        this.argument = argument
+    end
+    
+    void translateToARM(class ARMGenerator armGenerator) is
+        char[] freeLabel = call stringToCharArray("free");
+        class BL freee = new class BL(freeLabel, COND_AL);
+        class Argument argument = this.argument;
+        call argument.loadInto(armGenerator, R0);
+        call armGenerator.add(freee)
+    end
+end
+class TACPrint extends TACLine contains
+    enum printType type;
+    class Argument argument;
+    bool nline;
+    constructor(enum printType type, class Argument argument, bool nline) is
+        this.type = type;
+        this.argument = argument;
+        this.nline = nline
+    end
+end
+class JumpCondition extends TACLine contains
+    class Argument condition;
+    class TACLabel label;
+    constructor(class Argument condition, class TACLabel label) is
+        this.condition = condition;
+        this.label = label
+    end
+    
+    void translateToARM(class ARMGenerator armGenerator) is
+        class CharList charList = new class CharList();
+        call charList.add('L');
+        call charList.addPositiveInteger(this.label.id);
+        char[] labelName = call charList.asArray();
+        call charList.destroy();
+        free charList;
+        class Immediate zero = new class Immediate(0);
+        class CMP cmp = new class CMP(armGenerator.leftRegister, zero, COND_AL);
+        class B b = new class B(labelName, COND_NE);
+        class Argument condition = this.condition;
+        call condition.loadInto(armGenerator, armGenerator.leftRegister);
+        call armGenerator.add(cmp);
+        call armGenerator.add(b)
+    end
+end
+class Jump extends TACLine contains
+    class TACLabel label;
+    constructor(class TACLabel label) is
+        this.label = label
+    end
+    
+    void translateToARM(class ARMGenerator armGenerator) is
+        class CharList charList = new class CharList();
+        call charList.add('L');
+        call charList.addPositiveInteger(this.label.id);
+        char[] labelName = call charList.asArray();
+        call charList.destroy();
+        free charList;
+        class B b = new class B(labelName, COND_AL);
+        call armGenerator.add(b)
+    end
+end
+
+class TACRightSide contains
+    void loadInto(class ARMGenerator armGenerator, enum register register) is skip end
+end
+class ContentsOf extends TACRightSide contains
+    class TACLeftSide left;
+    class Argument offset;
+    enum wordSize size;
+    constructor(class TACLeftSide left, class Argument offset, enum wordSize size) is
+        this.left = left;
+        this.offset = offset;
+        this.size = size
+    end
+    
+    void loadInto(class ARMGenerator armGenerator, enum register register) is
+        class TACLeftSide left = this.left;
+        class Argument offset = this.offset;
+        call left.loadInto(armGenerator, armGenerator.leftRegister);
+        call offset.loadInto(armGenerator, armGenerator.offsetRegister);
+        class RegisterOffset regOff = new class RegisterOffset(armGenerator.leftRegister, armGenerator.offsetRegister);
+        class LDR ldr = new class LDR(register, regOff, COND_AL, this.size);
+        call armGenerator.add(ldr)
+    end
+end
+class AllocateHeap extends TACRightSide contains
+    int size;
+    constructor(int size) is
+        this.size = size
+    end
+    
+    void loadInto(class ARMGenerator armGenerator, enum register register) is
+        if this.size > 0 then
+            char[] malloc = call stringToCharArray("malloc");
+            class BL bl = new class BL(malloc, COND_AL);
+            class Register r0 = new class Register(R0);
+            class MOV movResult = new class MOV(register, r0, COND_AL, false);
+            if this.size <= 255 then
+                class Immediate imm = new class Immediate(this.size);
+                class MOV mov = new class MOV(R0, imm, COND_AL, false);
+                call armGenerator.add(mov)
+            else
+                class DataWordInt data = new class DataWordInt(this.size);
+                class LDR ldr = new class LDR(R0, data, COND_AL, WORD_FULL);
+                call armGenerator.add(ldr)
+            fi;
+            call armGenerator.add(bl);
+            call armGenerator.add(movResult)
+        else skip fi
+    end
+end
+class TACRead extends TACRightSide contains
+    enum readType type;
+    constructor(enum readType type) is
+        this.type = type
+    end
+end
+class LoadReturnValue extends TACRightSide contains
+    void loadInto(class ARMGenerator armGenerator, enum register register) is
+        class Register retReg = new class Register(armGenerator.returnRegister);
+        class MOV mov = new class MOV(register, retReg, COND_AL, false);
+        call armGenerator.add(mov)
+    end
+end
+class TACUnaryOperation extends TACRightSide contains
+    enum unaryOperator op;
+    class Argument argument;
+    constructor(enum unaryOperator op, class Argument argument) is
+        this.op = op;
+        this.argument = argument
+    end
+    
+    void loadInto(class ARMGenerator armGenerator, enum register register) is
+        class Argument argument = this.argument;
+        call argument.loadInto(armGenerator, armGenerator.leftRegister);
+
+        switch this.op matches
+            case UNOP_CHR do
+                class Immediate lowSevenBits = new class Immediate(127);
+                class AND and = new class AND(register, armGenerator.leftRegister, lowSevenBits, COND_AL, false);
+                call armGenerator.add(and)
+            end
+            case UNOP_LEN do
+                int intSize = call wordSize(WORD_FULL);
+                class ImmediateOffset immOff = new class ImmediateOffset(armGenerator.leftRegister, -intSize, false);
+                class LDR ldr = new class LDR(register, immOff, COND_AL, WORD_FULL);
+                call armGenerator.add(ldr)
+            end
+            case UNOP_NEGATE do
+                class Immediate zero = new class Immediate(0);
+                class RSB rsb = new class RSB(register, armGenerator.leftRegister, zero, COND_AL, true);
+                call armGenerator.add(rsb)
+            end
+            case UNOP_NOT do
+                class Immediate one = new class Immediate(1);
+                class EOR xor = new class EOR(register, armGenerator.leftRegister, one, COND_AL, false);
+                call armGenerator.add(xor)
+            end
+            case UNOP_ORD do
+                class Register leftReg = new class Register(armGenerator.leftRegister);
+                class MOV mov = new class MOV(register, leftReg, COND_AL, false);
+                call armGenerator.add(mov)
+            end
+            default skip
+        end
+    end
+end
+class TACBinaryOperation extends TACRightSide contains
+    enum binaryOperator op;
+    class Argument left;
+    class Argument right;
+    constructor(enum binaryOperator op, class Argument left, class Argument right) is
+        this.op = op;
+        this.left = left;
+        this.right = right
+    end
+
+    void loadConditionOpInto(class ARMGenerator armGenerator, enum register register, enum conditionCode tru, enum conditionCode fal) is
+        class Register rightReg = new class Register(armGenerator.rightRegister);
+        class CMP cmp = new class CMP(armGenerator.leftRegister, rightReg, COND_AL);
+        class Immediate zero = new class Immediate(0);
+        class Immediate one = new class Immediate(1);
+        class MOV movTrue = new class MOV(register, one, tru, false);
+        class MOV movFalse = new class MOV(register, zero, fal, false);
+        call armGenerator.add(cmp);
+        call armGenerator.add(movTrue);
+        call armGenerator.add(movFalse)
+    end
+    
+    void loadInto(class ARMGenerator armGenerator, enum register register) is
+        class Argument left = this.left;
+        class Argument right = this.right;
+        call left.loadInto(armGenerator, armGenerator.leftRegister);
+        call right.loadInto(armGenerator, armGenerator.rightRegister);
+        class Register rightReg = new class Register(armGenerator.rightRegister);
+
+        switch this.op matches
+            case BINOP_ADD do
+                class ADD add = new class ADD(register, armGenerator.leftRegister, rightReg, COND_AL, true);
+                call armGenerator.add(add)
+            end
+            case BINOP_SUBTRACT do
+                class SUB sub = new class SUB(register, armGenerator.leftRegister, rightReg, COND_AL, true);
+                call armGenerator.add(sub)
+            end
+            case BINOP_MULTIPLY do
+                class SMULL smull = new class SMULL(
+                    armGenerator.leftRegister,
+                    armGenerator.rightRegister,
+                    armGenerator.leftRegister,
+                    armGenerator.rightRegister,
+                    COND_AL, false
+                );
+                call armGenerator.add(smull)
+            end
+            case BINOP_DIVIDE do
+                class Register leftReg = new class Register(armGenerator.leftRegister);
+                class MOV movR1Right = new class MOV(R1, rightReg, COND_AL, true);
+                #char[] divByZero = call stringToCharArray("waccrte_div_by_zero");
+                #class BL blDivByZero = new class BL(divByZero, COND_EQ)
+                class MOV movR0Left = new class MOV(R0, leftReg, COND_AL, false);
+                char[] div = call stringToCharArray("__divsi3");
+                class BL blDiv = new class BL(div, COND_AL);
+                class Register r0 = new class Register(R0);
+                class MOV movResult = new class MOV(register, r0, COND_AL, false);
+                call armGenerator.add(movR1Right);
+                #call armGenerator.add(blDivByZero);
+                call armGenerator.add(movR0Left);
+                call armGenerator.add(blDiv);
+                call armGenerator.add(movResult)
+            end
+            case BINOP_MODULO do
+                class Register leftReg = new class Register(armGenerator.leftRegister);
+                class MOV movR1Right = new class MOV(R1, rightReg, COND_AL, true);
+                #char[] divByZero = call stringToCharArray("waccrte_div_by_zero");
+                #class BL blDivByZero = new class BL(divByZero, COND_EQ)
+                class MOV movR0Left = new class MOV(R0, leftReg, COND_AL, false);
+                char[] div = call stringToCharArray("__modsi3");
+                class BL blDiv = new class BL(div, COND_AL);
+                class Register r0 = new class Register(R0);
+                class MOV movResult = new class MOV(register, r0, COND_AL, false);
+                call armGenerator.add(movR1Right);
+                #call armGenerator.add(blDivByZero);
+                call armGenerator.add(movR0Left);
+                call armGenerator.add(blDiv);
+                call armGenerator.add(movResult)
+            end
+            case BINOP_AND do
+                class AND and = new class AND(register, armGenerator.leftRegister, rightReg, COND_AL, true);
+                call armGenerator.add(and)
+            end
+            case BINOP_OR do
+                class ORR orr = new class ORR(register, armGenerator.leftRegister, rightReg, COND_AL, true);
+                call armGenerator.add(orr)
+            end
+            case BINOP_EQT do call this.loadConditionOpInto(armGenerator, register, COND_EQ, COND_NE) end
+            case BINOP_NEQ do call this.loadConditionOpInto(armGenerator, register, COND_NE, COND_EQ) end
+            case BINOP_GEQ do call this.loadConditionOpInto(armGenerator, register, COND_GE, COND_LT) end
+            case BINOP_GTT do call this.loadConditionOpInto(armGenerator, register, COND_GT, COND_LE) end
+            case BINOP_LEQ do call this.loadConditionOpInto(armGenerator, register, COND_LE, COND_GT) end
+            case BINOP_LST do call this.loadConditionOpInto(armGenerator, register, COND_LT, COND_GE) end
+            default skip
+        end
+    end
+end
+
+class Argument extends TACRightSide contains end
+class ImmediateInteger extends Argument contains
+    int value;
+    constructor(int value) is
+        this.value = value
+    end
+
+    void loadInto(class ARMGenerator armGenerator, enum register register) is
+        if -255 <= this.value && this.value <= 255 then
+            class Immediate imm = new class Immediate(this.value);
+            class MOV mov = new class MOV(register, imm, COND_AL, false);
+            call armGenerator.add(mov)
+        else
+            class DataWordInt data = new class DataWordInt(this.value);
+            class LDR ldr = new class LDR(register, data, COND_AL, WORD_FULL);
+            call armGenerator.add(ldr)
+        fi
+    end
+end
+class ImmediateBoolean extends Argument contains
+    bool value;
+    constructor(bool value) is
+        this.value = value
+    end
+    
+    void loadInto(class ARMGenerator armGenerator, enum register register) is
+        int b = 0;
+        if this.value then b = 1 else b = 0 fi;
+        class Immediate imm = new class Immediate(b);
+        class MOV mov = new class MOV(register, imm, COND_AL, false);
+        call armGenerator.add(mov)
+    end
+end
+class ImmediateCharacter extends Argument contains
+    char value;
+    constructor(char value) is
+        this.value = value
+    end
+    
+    void loadInto(class ARMGenerator armGenerator, enum register register) is
+        int i = ord this.value;
+        class Immediate imm = new class Immediate(i);
+        class MOV mov = new class MOV(register, imm, COND_AL, false);
+        call armGenerator.add(mov)
+    end
+end
+class ImmediateString extends Argument contains
+    int index;
+    constructor(int index) is
+        this.index = index
+    end
+    
+    void loadInto(class ARMGenerator armGenerator, enum register register) is
+        class CharList charList = new class CharList();
+        call charList.add('S');
+        call charList.addPositiveInteger(this.index);
+        char[] labelName = call charList.asArray();
+        call charList.destroy();
+        free charList;
+        class DataWordLabel data = new class DataWordLabel(labelName);
+        class LDR ldr = new class LDR(register, data, COND_AL, WORD_FULL);
+        call armGenerator.add(ldr)
+    end
+end
+
+class TACLeftSide extends Argument contains
+    enum stackLocation stackLocation;
+    int locationIndex;
+    
+    void loadInto(class ARMGenerator armGenerator, enum register register) is
+        int offset = 0;
+        if this.stackLocation == STACK_LOCAL then
+            offset = -(this.locationIndex + 1)
+        else if this.stackLocation == STACK_ARGS then
+            offset = len armGenerator.functionRegisters + this.locationIndex + 2
+        else exit 1 fi fi;
+        if -255 <= offset && offset <= 255 then
+            class ImmediateOffset immOff = new class ImmediateOffset(R_FRAME_POINTER, offset * 4, false);
+            class LDR ldr = new class LDR(register, immOff, COND_AL, WORD_FULL);
+            call armGenerator.add(ldr)
+        else
+            class DataWordInt data = new class DataWordInt(offset * 4);
+            class LDR ldr = new class LDR(register, data, COND_AL, WORD_FULL);
+            call armGenerator.add(ldr);
+            class ImmediateOffset immOff = new class ImmediateOffset(R_FRAME_POINTER, offset * 4, false);
+            ldr = new class LDR(register, immOff, COND_AL, WORD_FULL);
+            call armGenerator.add(ldr)
+        fi
+    end
+
+    void storeFrom(class ARMGenerator armGenerator, enum register register) is
+        int offset = 0;
+        if this.stackLocation == STACK_LOCAL then
+            offset = -(this.locationIndex + 1)
+        else if this.stackLocation == STACK_ARGS then
+            offset = len armGenerator.functionRegisters + this.locationIndex + 2
+        else exit 1 fi fi;
+        if -255 <= offset && offset <= 255 then
+            class ImmediateOffset immOff = new class ImmediateOffset(R_FRAME_POINTER, offset * 4, false);
+            class STR str = new class STR(register, immOff, COND_AL, WORD_FULL);
+            call armGenerator.add(str)
+        else
+            class DataWordInt data = new class DataWordInt(offset * 4);
+            class STR str = new class STR(register, data, COND_AL, WORD_FULL);
+            call armGenerator.add(str);
+            class ImmediateOffset immOff = new class ImmediateOffset(R_FRAME_POINTER, offset * 4, false);
+            str = new class STR(register, immOff, COND_AL, WORD_FULL);
+            call armGenerator.add(str)
+        fi
+    end
+end
+class Temp extends TACLeftSide contains
+    int id;
+    constructor(int id, enum stackLocation stackLocation, int locationIndex) is
+        this.id = id;
+        this.stackLocation = stackLocation;
+        this.locationIndex = locationIndex
+    end
+end
+class Variable extends TACLeftSide contains
+    char[] name;
+    constructor(char[] name, enum stackLocation stackLocation, int locationIndex) is
+        this.name = name;
+        this.stackLocation = stackLocation;
+        this.locationIndex = locationIndex
+    end
+end
+
+begin skip end

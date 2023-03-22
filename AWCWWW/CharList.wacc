@@ -1,0 +1,62 @@
+class CharList contains
+    char[] array;
+    int length;
+
+    constructor() is
+        this.length = 0;
+        this.array = newarray(1);
+        this.array[0] = '\0'
+    end
+
+    void add(char c) is
+        if this.length == len this.array then
+            char[] nextArray = newarray(this.length * 2);
+            for i = 0 to this.length do nextArray[i] = this.array[i] done;
+            free this.array;
+            this.array = nextArray
+        else skip fi;
+
+        this.array[this.length] = c;
+        this.length = this.length + 1
+    end
+
+    void addPositiveInteger(int i) is
+        if i == 0 then
+            call this.add('0')
+        else
+            while i > 0 do
+                int digit = i % 10;
+                call this.add(chr (48 + digit));
+                i = i / 10
+            done
+        fi
+    end
+
+    void clear() is
+        this.length = 0
+    end
+
+    char[] asArray() is
+        char[] array = newarray(this.length);
+        for i = 0 to this.length do
+            array[i] = this.array[i]
+        done;
+        return array
+    end
+
+    char get(int i) is
+        if i < 0 || i >= this.length then
+            println "CharList.get(i) error: Index out of bounds";
+            exit 1
+        else
+            return this.array[i]
+        fi
+    end
+
+    void destroy() is
+        free this.array
+    end
+
+end
+
+begin skip end

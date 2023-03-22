@@ -1,0 +1,704 @@
+import ThreeAddressCode.wacc
+import File.wacc
+
+enum conditionCode contains
+    COND_AL, COND_EQ, COND_NE, COND_VS, COND_GT, COND_GE, COND_LT, COND_LE
+end
+
+enum register contains
+    R_STACK_POINTER, R_FRAME_POINTER, R_LINK_REGISTER, R_PROGRAM_COUNTER,
+    R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12
+end
+
+class ARMGenerator contains
+    class ARMList armList;
+    char[][] strings;
+
+    enum register[] mainPushPop;
+    enum register[] functionRegisters;
+
+    enum register leftRegister;
+    enum register rightRegister;
+    enum register offsetRegister;
+    enum register returnRegister;
+
+    constructor(char[][] strings) is
+        this.armList = new class ARMList();
+        this.strings = strings;
+        this.mainPushPop = [R8, R10, R12];
+        this.functionRegisters = [R4, R5, R6];
+        this.leftRegister = this.functionRegisters[0];
+        this.rightRegister = this.functionRegisters[1];
+        this.offsetRegister = this.functionRegisters[2];
+        this.returnRegister = R7
+    end
+
+    void add(class Instruction instruction) is
+        class ARMList armList = this.armList;
+        call armList.add(instruction)
+    end
+
+    void translateToARM(class TACLine[] program) is
+        for i = 0 to len program do
+            class TACLine tacLine = program[i];
+            call tacLine.translateToARM(this)
+        done
+    end
+
+    void printARM(file armFile) is
+        call fileWriteString(armFile, ".data\n");
+        for i = 0 to len this.strings do
+            fwrite armFile, 'S';
+            call printARMInteger(armFile, i);
+            call fileWriteString(armFile, ": .string ");
+            fwrite armFile, '\"';
+            char[] s = this.strings[i];
+            call fileWriteCharArray(armFile, s);
+            fwrite armFile, '\"';
+            fwrite armFile, '\n'
+        done;
+        call fileWriteString(armFile, ".text\n");
+        call fileWriteString(armFile, ".global main\n");
+
+        class ARMList armList = this.armList;
+        call armList.printARM(armFile)
+    end
+end
+
+class ARMPrintable contains
+    void printARM(file armFile) is skip end
+end
+
+class ARMList extends ARMPrintable contains
+    class Instruction[] array;
+    int length;
+
+    constructor() is
+        this.length = 0;
+        this.array = newarray(1)
+    end
+
+    void add(class Instruction instruction) is
+        if this.length == len this.array then
+            class Instruction[] nextArray = newarray(this.length * 2);
+            for i = 0 to this.length do nextArray[i] = this.array[i] done;
+            free this.array;
+            this.array = nextArray
+        else skip fi;
+
+        this.array[this.length] = instruction;
+        this.length = this.length + 1
+    end
+
+    void printARM(file armFile) is
+        for i = 0 to this.length do
+            class Instruction instruction = this.array[i];
+            call instruction.printARM(armFile);
+            fwrite armFile, '\n'
+        done
+    end
+
+    class Instruction[] asArray() is
+        class Instruction[] array = newarray(this.length);
+        for i = 0 to this.length do
+            array[i] = this.array[i]
+        done;
+        return array
+    end
+
+    class Instruction get(int i) is
+        if i < 0 || i >= this.length then
+            println "ARMList.get(i) error: Index out of bounds";
+            exit 1
+        else
+            return this.array[i]
+        fi
+    end
+
+    void destroy() is
+        free this.array
+    end
+
+end
+
+class InstructionArgument extends ARMPrintable contains end
+class AddressingMode2 extends InstructionArgument contains end
+class ZeroOffset extends AddressingMode2 contains
+    enum register register;
+    constructor(enum register register) is
+        this.register = register
+    end
+    
+    void printARM(file armFile) is
+        fwrite armFile, '[';
+        call printARMRegister(armFile, this.register);
+        fwrite armFile, ']'
+    end
+end
+class ImmediateOffset extends AddressingMode2 contains
+    enum register register;
+    int offset;
+    bool updateBasePointer;
+    constructor(enum register register, int offset, bool updateBasePointer) is
+        this.register = register;
+        this.offset = offset;
+        this.updateBasePointer = updateBasePointer
+    end
+    
+    void printARM(file armFile) is
+        fwrite armFile, '[';
+        call printARMRegister(armFile, this.register);
+        fwrite armFile, ',';
+        fwrite armFile, '#';
+        call printARMInteger(armFile, this.offset);
+        fwrite armFile, ']';
+        if this.updateBasePointer then fwrite armFile, '!' else skip fi
+    end
+end
+class RegisterOffset extends AddressingMode2 contains
+    enum register register;
+    enum register offset;
+    constructor(enum register register, enum register offset) is
+        this.register = register;
+        this.offset = offset
+    end
+    
+    void printARM(file armFile) is
+        fwrite armFile, '[';
+        call printARMRegister(armFile, this.register);
+        fwrite armFile, ',';
+        call printARMRegister(armFile, this.offset);
+        fwrite armFile, ']'
+    end
+end
+class RegisterOffsetLSL extends AddressingMode2 contains
+    enum register register;
+    enum register offset;
+    int shift;
+    constructor(enum register register, enum register offset, int shift) is
+        this.register = register;
+        this.offset = offset;
+        this.shift = shift
+    end
+    
+    void printARM(file armFile) is
+        fwrite armFile, '[';
+        call printARMRegister(armFile, this.register);
+        fwrite armFile, ',';
+        call printARMRegister(armFile, this.offset);
+        call fileWriteString(armFile, ",lsl #");
+        call printARMInteger(armFile, this.shift);
+        fwrite armFile, ']'
+    end
+end
+class DataWordInt extends AddressingMode2 contains
+    int n;
+    constructor(int n) is
+        this.n = n
+    end
+    
+    void printARM(file armFile) is
+        fwrite armFile, '=';
+        call printARMInteger(armFile, this.n)
+    end
+end
+class DataWordLabel extends AddressingMode2 contains
+    char[] name;
+    constructor(char[] name) is
+        this.name = name
+    end
+    
+    void printARM(file armFile) is
+        fwrite armFile, '=';
+        call fileWriteCharArray(armFile, this.name)
+    end
+end
+
+class Operand2 extends InstructionArgument contains end
+class Register extends Operand2 contains
+    enum register register;
+    constructor(enum register register) is
+        this.register = register
+    end
+
+    void printARM(file armFile) is
+        call printARMRegister(armFile, this.register)
+    end
+end
+class Immediate extends Operand2 contains
+    int n;
+    constructor(int n) is
+        this.n = n
+    end
+    
+    void printARM(file armFile) is
+        fwrite armFile, '#';
+        call printARMInteger(armFile, this.n)
+    end
+end
+class ArithmeticShiftRight extends Operand2 contains
+    enum register register;
+    int n;
+    constructor(enum register register, int n) is
+        this.register = register;
+        this.n = n
+    end
+    
+    void printARM(file armFile) is
+        call printARMRegister(armFile, this.register);
+        call fileWriteString(armFile, ",asr #");
+        call printARMInteger(armFile, this.n)
+    end
+end
+
+class Instruction extends ARMPrintable contains end
+class Tag extends Instruction contains
+    char[] tag;
+    constructor(char[] tag) is
+        this.tag = tag
+    end
+
+    void printARM(file armFile) is
+        call fileWriteCharArray(armFile, this.tag)
+    end
+end
+class ARMLabel extends Instruction contains
+    char[] name;
+    constructor(char[] name) is
+        this.name = name
+    end
+    
+    void printARM(file armFile) is
+        call fileWriteCharArray(armFile, this.name);
+        fwrite armFile, ':'
+    end
+end
+class NOP extends Instruction contains
+    void printARM(file armFile) is
+        call fileWriteString(armFile, "nop")
+    end
+end
+class LDR extends Instruction contains
+    enum register register;
+    class AddressingMode2 am2;
+    enum conditionCode cond;
+    enum wordSize size;
+    constructor(enum register register, class AddressingMode2 am2, enum conditionCode cond, enum wordSize size) is
+        this.register = register;
+        this.am2 = am2;
+        this.cond = cond;
+        this.size = size
+    end
+
+    void printARM(file armFile) is
+        class AddressingMode2 am2 = this.am2;
+        call fileWriteString(armFile, "ldr");
+        call printARMCondition(armFile, this.cond);
+        call printARMWordSize(armFile, this.size);
+        fwrite armFile, ' ';
+        call printARMRegister(armFile, this.register);
+        fwrite armFile, ',';
+        call am2.printARM(armFile)
+    end
+end
+class STR extends Instruction contains
+    enum register register;
+    class AddressingMode2 am2;
+    enum conditionCode cond;
+    enum wordSize size;
+    constructor(enum register register, class AddressingMode2 am2, enum conditionCode cond, enum wordSize size) is
+        this.register = register;
+        this.am2 = am2;
+        this.cond = cond;
+        this.size = size
+    end
+
+    void printARM(file armFile) is
+        class AddressingMode2 am2 = this.am2;
+        call fileWriteString(armFile, "str");
+        call printARMCondition(armFile, this.cond);
+        call printARMWordSize(armFile, this.size);
+        fwrite armFile, ' ';
+        call printARMRegister(armFile, this.register);
+        fwrite armFile, ',';
+        call am2.printARM(armFile)
+    end
+end
+class MOV extends Instruction contains
+    enum register register;
+    class Operand2 op2;
+    enum conditionCode cond;
+    bool setStatus;
+    constructor(enum register register, class Operand2 op2, enum conditionCode cond, bool setStatus) is
+        this.register = register;
+        this.op2 = op2;
+        this.cond = cond;
+        this.setStatus = setStatus
+    end
+
+    void printARM(file armFile) is
+        class Operand2 op2 = this.op2;
+        call fileWriteString(armFile, "mov");
+        call printARMCondition(armFile, this.cond);
+        if this.setStatus then fwrite armFile, 's' else skip fi;
+        fwrite armFile, ' ';
+        call printARMRegister(armFile, this.register);
+        fwrite armFile, ',';
+        call op2.printARM(armFile)
+    end
+end
+class CMP extends Instruction contains
+    enum register register;
+    class Operand2 op2;
+    enum conditionCode cond;
+    constructor(enum register register, class Operand2 op2, enum conditionCode cond) is
+        this.register = register;
+        this.op2 = op2;
+        this.cond = cond
+    end
+
+    void printARM(file armFile) is
+        class Operand2 op2 = this.op2;
+        call fileWriteString(armFile, "cmp");
+        call printARMCondition(armFile, this.cond);
+        fwrite armFile, ' ';
+        call printARMRegister(armFile, this.register);
+        fwrite armFile, ',';
+        call op2.printARM(armFile)
+    end
+end
+class ADD extends Instruction contains
+    enum register left;
+    enum register right;
+    class Operand2 op2;
+    enum conditionCode cond;
+    bool setStatus;
+    constructor(enum register left, enum register right, class Operand2 op2, enum conditionCode cond, bool setStatus) is
+        this.left = left;
+        this.right = right;
+        this.op2 = op2;
+        this.cond = cond;
+        this.setStatus = setStatus
+    end
+
+    void printARM(file armFile) is
+        class Operand2 op2 = this.op2;
+        call fileWriteString(armFile, "add");
+        call printARMCondition(armFile, this.cond);
+        if this.setStatus then fwrite armFile, 's' else skip fi;
+        fwrite armFile, ' ';
+        call printARMRegister(armFile, this.left);
+        fwrite armFile, ',';
+        call printARMRegister(armFile, this.right);
+        fwrite armFile, ',';
+        call op2.printARM(armFile)
+    end
+end
+class SUB extends Instruction contains
+    enum register left;
+    enum register right;
+    class Operand2 op2;
+    enum conditionCode cond;
+    bool setStatus;
+    constructor(enum register left, enum register right, class Operand2 op2, enum conditionCode cond, bool setStatus) is
+        this.left = left;
+        this.right = right;
+        this.op2 = op2;
+        this.cond = cond;
+        this.setStatus = setStatus
+    end
+
+    void printARM(file armFile) is
+        class Operand2 op2 = this.op2;
+        call fileWriteString(armFile, "sub");
+        call printARMCondition(armFile, this.cond);
+        if this.setStatus then fwrite armFile, 's' else skip fi;
+        fwrite armFile, ' ';
+        call printARMRegister(armFile, this.left);
+        fwrite armFile, ',';
+        call printARMRegister(armFile, this.right);
+        fwrite armFile, ',';
+        call op2.printARM(armFile)
+    end
+end
+class RSB extends Instruction contains
+    enum register left;
+    enum register right;
+    class Operand2 op2;
+    enum conditionCode cond;
+    bool setStatus;
+    constructor(enum register left, enum register right, class Operand2 op2, enum conditionCode cond, bool setStatus) is
+        this.left = left;
+        this.right = right;
+        this.op2 = op2;
+        this.cond = cond;
+        this.setStatus = setStatus
+    end
+
+    void printARM(file armFile) is
+        class Operand2 op2 = this.op2;
+        call fileWriteString(armFile, "rsb");
+        call printARMCondition(armFile, this.cond);
+        if this.setStatus then fwrite armFile, 's' else skip fi;
+        fwrite armFile, ' ';
+        call printARMRegister(armFile, this.left);
+        fwrite armFile, ',';
+        call printARMRegister(armFile, this.right);
+        fwrite armFile, ',';
+        call op2.printARM(armFile)
+    end
+end
+class AND extends Instruction contains
+    enum register left;
+    enum register right;
+    class Operand2 op2;
+    enum conditionCode cond;
+    bool setStatus;
+    constructor(enum register left, enum register right, class Operand2 op2, enum conditionCode cond, bool setStatus) is
+        this.left = left;
+        this.right = right;
+        this.op2 = op2;
+        this.cond = cond;
+        this.setStatus = setStatus
+    end
+
+    void printARM(file armFile) is
+        class Operand2 op2 = this.op2;
+        call fileWriteString(armFile, "and");
+        call printARMCondition(armFile, this.cond);
+        if this.setStatus then fwrite armFile, 's' else skip fi;
+        fwrite armFile, ' ';
+        call printARMRegister(armFile, this.left);
+        fwrite armFile, ',';
+        call printARMRegister(armFile, this.right);
+        fwrite armFile, ',';
+        call op2.printARM(armFile)
+    end
+end
+class EOR extends Instruction contains
+    enum register left;
+    enum register right;
+    class Operand2 op2;
+    enum conditionCode cond;
+    bool setStatus;
+    constructor(enum register left, enum register right, class Operand2 op2, enum conditionCode cond, bool setStatus) is
+        this.left = left;
+        this.right = right;
+        this.op2 = op2;
+        this.cond = cond;
+        this.setStatus = setStatus
+    end
+
+    void printARM(file armFile) is
+        class Operand2 op2 = this.op2;
+        call fileWriteString(armFile, "eor");
+        call printARMCondition(armFile, this.cond);
+        if this.setStatus then fwrite armFile, 's' else skip fi;
+        fwrite armFile, ' ';
+        call printARMRegister(armFile, this.left);
+        fwrite armFile, ',';
+        call printARMRegister(armFile, this.right);
+        fwrite armFile, ',';
+        call op2.printARM(armFile)
+    end
+end
+class ORR extends Instruction contains
+    enum register left;
+    enum register right;
+    class Operand2 op2;
+    enum conditionCode cond;
+    bool setStatus;
+    constructor(enum register left, enum register right, class Operand2 op2, enum conditionCode cond, bool setStatus) is
+        this.left = left;
+        this.right = right;
+        this.op2 = op2;
+        this.cond = cond;
+        this.setStatus = setStatus
+    end
+
+    void printARM(file armFile) is
+        class Operand2 op2 = this.op2;
+        call fileWriteString(armFile, "orr");
+        call printARMCondition(armFile, this.cond);
+        if this.setStatus then fwrite armFile, 's' else skip fi;
+        fwrite armFile, ' ';
+        call printARMRegister(armFile, this.left);
+        fwrite armFile, ',';
+        call printARMRegister(armFile, this.right);
+        fwrite armFile, ',';
+        call op2.printARM(armFile)
+    end
+end
+class SMULL extends Instruction contains
+    enum register leftLow;
+    enum register rightLow;
+    enum register leftHigh;
+    enum register rightHigh;
+    enum conditionCode cond;
+    bool setStatus;
+    constructor(enum register leftLow, enum register rightLow, enum register leftHigh, enum register rightHigh, enum conditionCode cond, bool setStatus) is
+        this.leftLow = leftLow;
+        this.rightLow = rightLow;
+        this.leftHigh = leftHigh;
+        this.rightHigh = rightHigh;
+        this.cond = cond;
+        this.setStatus = setStatus
+    end
+
+    void printARM(file armFile) is
+        call fileWriteString(armFile, "smull");
+        call printARMCondition(armFile, this.cond);
+        if this.setStatus then fwrite armFile, 's' else skip fi;
+        fwrite armFile, ' ';
+        call printARMRegister(armFile, this.leftLow);
+        fwrite armFile, ',';
+        call printARMRegister(armFile, this.rightLow);
+        fwrite armFile, ',';
+        call printARMRegister(armFile, this.leftHigh);
+        fwrite armFile, ',';
+        call printARMRegister(armFile, this.rightHigh)
+    end
+end
+class B extends Instruction contains
+    char[] label;
+    enum conditionCode cond;
+    constructor(char[] label, enum conditionCode cond) is
+        this.label = label;
+        this.cond = cond
+    end
+    
+    void printARM(file armFile) is
+        fwrite armFile, 'b';
+        call printARMCondition(armFile, this.cond);
+        fwrite armFile, ' ';
+        call fileWriteCharArray(armFile, this.label)
+    end
+end
+class BL extends Instruction contains
+    char[] label;
+    enum conditionCode cond;
+    constructor(char[] label, enum conditionCode cond) is
+        this.label = label;
+        this.cond = cond
+    end
+    
+    void printARM(file armFile) is
+        fwrite armFile, 'b';
+        fwrite armFile, 'l';
+        call printARMCondition(armFile, this.cond);
+        fwrite armFile, ' ';
+        call fileWriteCharArray(armFile, this.label)
+    end
+end
+class Push extends Instruction contains
+    enum register[] registers;
+    constructor(enum register[] registers) is
+        this.registers = registers
+    end
+    
+    void printARM(file armFile) is
+        call fileWriteString(armFile, "push {");
+        for i = 0 to len this.registers - 1 do
+            enum register register = this.registers[i];
+            call printARMRegister(armFile, register);
+            fwrite armFile, ','
+        done;
+        enum register register = this.registers[len this.registers - 1];
+        call printARMRegister(armFile, register);
+        fwrite armFile, '}'
+    end
+end
+class Pop extends Instruction contains
+    enum register[] registers;
+    constructor(enum register[] registers) is
+        this.registers = registers
+    end
+    
+    void printARM(file armFile) is
+        call fileWriteString(armFile, "pop {");
+        for i = 0 to len this.registers - 1 do
+            enum register register = this.registers[i];
+            call printARMRegister(armFile, register);
+            fwrite armFile, ','
+        done;
+        enum register register = this.registers[len this.registers - 1];
+        call printARMRegister(armFile, register);
+        fwrite armFile, '}'
+    end
+end
+
+begin
+    void printARMRegister(file armFile, enum register register) is
+        switch register matches
+            case R_FRAME_POINTER do call fileWriteString(armFile, "fp") end
+            case R_LINK_REGISTER do call fileWriteString(armFile, "lr") end
+            case R_PROGRAM_COUNTER do call fileWriteString(armFile, "pc") end
+            case R_STACK_POINTER do call fileWriteString(armFile, "sp") end
+            case R0 do call fileWriteString(armFile, "r0") end
+            case R1 do call fileWriteString(armFile, "r1") end
+            case R2 do call fileWriteString(armFile, "r2") end
+            case R3 do call fileWriteString(armFile, "r3") end
+            case R4 do call fileWriteString(armFile, "r4") end
+            case R5 do call fileWriteString(armFile, "r5") end
+            case R6 do call fileWriteString(armFile, "r6") end
+            case R7 do call fileWriteString(armFile, "r7") end
+            case R8 do call fileWriteString(armFile, "r8") end
+            case R9 do call fileWriteString(armFile, "r9") end
+            case R10 do call fileWriteString(armFile, "r10") end
+            case R11 do call fileWriteString(armFile, "r11") end
+            case R12 do call fileWriteString(armFile, "r12") end
+            default skip
+        end
+    end
+
+    void printARMCondition(file armFile, enum conditionCode cond) is
+        switch cond matches
+            case COND_AL do skip end
+            case COND_EQ do call fileWriteString(armFile, "eq") end
+            case COND_NE do call fileWriteString(armFile, "ne") end
+            case COND_GE do call fileWriteString(armFile, "ge") end
+            case COND_GT do call fileWriteString(armFile, "gt") end
+            case COND_LE do call fileWriteString(armFile, "le") end
+            case COND_LT do call fileWriteString(armFile, "lt") end
+            case COND_VS do call fileWriteString(armFile, "vs") end
+            default skip
+        end
+    end
+
+    void printARMWordSize(file armFile, enum wordSize size) is
+        switch size matches
+            case WORD_BYTE do fwrite armFile, 'b' end
+            case WORD_FULL do skip end
+            default skip
+        end
+    end
+
+    void printARMInteger(file armFile, int i) is
+        class CharList charList = new class CharList();
+        if i > 0 then
+            while i > 0 do
+                int digit = i % 10;
+                call charList.add(chr (48 + digit));
+                i = i / 10
+            done
+        else if i < 0 then
+            while i < 0 do
+                int digit = -(i % 10);
+                call charList.add(chr (48 + digit));
+                i = i / 10
+            done;
+            call charList.add('-')
+        else
+            call charList.add('0')
+        fi fi;
+        
+        char[] cs = call charList.asArray();
+        call charList.destroy();
+        free charList;
+        for i = 0 to len cs do
+            fwrite armFile, cs[len cs - i - 1]
+        done
+    end
+
+    skip
+end

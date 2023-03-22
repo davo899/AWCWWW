@@ -1,0 +1,338 @@
+import Token.wacc
+import CharList.wacc
+import String.wacc
+import Character.wacc
+
+class Lexer contains
+    class CharList source;
+    int currentIndex;
+    pair(string, enum token)[] hardKeywords;
+
+    constructor(class CharList source) is
+        this.source = source;
+        this.currentIndex = 0;
+
+        string[] keywordStrings = [
+            "int", "bool", "char", "string", "pair",
+            "true", "false", "null",
+            "if", "then", "else", "fi",
+            "while", "do", "done",
+            "is", "begin", "end",
+            "skip", "read", "free", "return", "exit", "print", "println",
+            "call", "newpair",
+            "fst", "snd",
+            "len", "ord", "chr"
+        ];
+        enum token[] keywordTypes = [
+            TOKEN_INT, TOKEN_BOOL, TOKEN_CHAR, TOKEN_STRING, TOKEN_PAIR,
+            TOKEN_TRUE, TOKEN_FALSE, TOKEN_NULL,
+            TOKEN_IF, TOKEN_THEN, TOKEN_ELSE, TOKEN_FI,
+            TOKEN_WHILE, TOKEN_DO, TOKEN_DONE,
+            TOKEN_IS, TOKEN_BEGIN, TOKEN_END,
+            TOKEN_SKIP, TOKEN_READ, TOKEN_FREE, TOKEN_RETURN, TOKEN_EXIT, TOKEN_PRINT, TOKEN_PRINTLN,
+            TOKEN_CALL, TOKEN_NEWPAIR,
+            TOKEN_FST, TOKEN_SND,
+            TOKEN_LEN, TOKEN_ORD, TOKEN_CHR
+        ];
+        if len keywordStrings == len keywordTypes then
+            this.hardKeywords = newarray(len keywordStrings);
+            for i = 0 to len keywordStrings do
+                pair(string, enum token) p = newpair(keywordStrings[i], keywordTypes[i]);
+                this.hardKeywords[i] = p
+            done;
+            free keywordStrings;
+            free keywordTypes
+        else
+            println "Lexer could not build hard keyword array, lengths did not match";
+            exit 1
+        fi
+    end
+
+    char currentChar() is
+        class CharList source = this.source;
+        char c = call source.get(this.currentIndex);
+        if ord c < 0 || ord c > 127 then
+            println "WACC only allows ASCII characters";
+            exit 100
+        else return c fi
+    end
+
+    bool isIdentStart(char c) is
+        bool isAlpha = call isAlpha(c);
+        return isAlpha || c == '_'
+    end
+
+    bool isIdent(char c) is
+        bool isIdent = call this.isIdentStart(c);
+        bool isDigit = call isDigit(c);
+        return isIdent || isDigit
+    end
+
+    void advance() is
+        char currentChar = call this.currentChar();
+        if currentChar != '\0' && this.currentIndex < this.source.length then
+            this.currentIndex = this.currentIndex + 1
+        else skip fi
+    end
+
+    char peek(int offset) is
+        if this.currentIndex + offset < this.source.length then
+            class CharList source = this.source;
+            char c = call source.get(this.currentIndex + offset);
+            return c
+        else
+            return '\0'
+        fi
+    end
+
+    void skipWhitespace() is
+        char currentChar = call this.currentChar();
+        while (11 <= ord currentChar && ord currentChar <= 15) || currentChar == '#' do
+            if currentChar == '#' then
+                while currentChar != '\n' && currentChar != '\r' && currentChar != '\0' do
+                    call this.advance();
+                    currentChar = call this.currentChar()
+                done
+            else skip fi;
+            call this.advance();
+            currentChar = call this.currentChar()
+        done
+    end
+
+    class Token nextToken() is
+        char currentChar = call this.currentChar();
+        while currentChar != '\0' do
+            call this.skipWhitespace();
+            currentChar = call this.currentChar();
+
+            bool isDigit = call isDigit(currentChar);
+            if isDigit then
+                class Token token = call this.parseIntegerLiteral();
+                return token
+            else skip fi;
+
+            bool isIdentStart = call this.isIdentStart(currentChar);
+            if isIdentStart then
+                class Token token = call this.parseIdentifier();
+                return token
+            else skip fi;
+
+            # Using '\'' broke the syntax highlighting, so this is a workaround for that
+            if ord currentChar == 39 then
+                class Token token = call this.parseCharLiteral();
+                return token
+            else skip fi;
+
+            switch currentChar matches
+                case '\"' do class Token token = call this.parseStringLiteral(); return token end
+                case '(' do class Token token = call this.parseSingleCharToken(currentChar, TOKEN_LPAREN); return token end
+                case ')' do class Token token = call this.parseSingleCharToken(currentChar, TOKEN_RPAREN); return token end
+                case '[' do class Token token = call this.parseSingleCharToken(currentChar, TOKEN_LSQPAREN); return token end
+                case ']' do class Token token = call this.parseSingleCharToken(currentChar, TOKEN_RSQPAREN); return token end
+                case ',' do class Token token = call this.parseSingleCharToken(currentChar, TOKEN_COMMA); return token end
+                case ';' do class Token token = call this.parseSingleCharToken(currentChar, TOKEN_SEMICOLON); return token end
+                case '*' do class Token token = call this.parseSingleCharToken(currentChar, TOKEN_STAR); return token end
+                case '/' do class Token token = call this.parseSingleCharToken(currentChar, TOKEN_SLASH); return token end
+                case '%' do class Token token = call this.parseSingleCharToken(currentChar, TOKEN_PERCENT); return token end
+                case '+' do class Token token = call this.parseSingleCharToken(currentChar, TOKEN_PLUS); return token end
+                case '-' do class Token token = call this.parseSingleCharToken(currentChar, TOKEN_MINUS); return token end
+                case '>' do class Token token = call this.parseOrEqualsCharToken(currentChar, TOKEN_GTT, TOKEN_GEQ); return token end
+                case '<' do class Token token = call this.parseOrEqualsCharToken(currentChar, TOKEN_LST, TOKEN_LEQ); return token end
+                case '=' do class Token token = call this.parseOrEqualsCharToken(currentChar, TOKEN_EQUALS, TOKEN_EQT); return token end
+                case '!' do class Token token = call this.parseOrEqualsCharToken(currentChar, TOKEN_BANG, TOKEN_NEQ); return token end
+                case '&' do
+                    char next = call this.peek(1);
+                    if next == '&' then class Token token = call this.parseDoubleCharToken(currentChar, next, TOKEN_AND); return token else skip fi
+                end
+                case '|' do
+                    char next = call this.peek(1);
+                    if next == '|' then class Token token = call this.parseDoubleCharToken(currentChar, next, TOKEN_OR); return token else skip fi
+                end
+                default skip
+            end;
+
+            call this.advance();
+            currentChar = call this.currentChar()
+        done;
+
+        class Token token = new class Token(TOKEN_EOF);
+        return token
+    end
+
+    class Token parseIntegerLiteral() is
+        class CharList value = new class CharList();
+
+        char currentChar = call this.currentChar();
+        bool isDigit = call isDigit(currentChar);
+        while isDigit do
+            call value.add(currentChar);
+            call this.advance();
+            currentChar = call this.currentChar();
+            isDigit = call isDigit(currentChar)
+        done;
+
+        class Token token = new class Token(TOKEN_INT_LITER);
+        token.value = call value.asArray();
+        call value.destroy();
+        free value;
+        return token
+    end
+
+    class Token parseIdentifier() is
+        class CharList value = new class CharList();
+        
+        char currentChar = call this.currentChar();
+        bool isIdent = call this.isIdentStart(currentChar);
+        while isIdent do
+            call value.add(currentChar);
+            call this.advance();
+            currentChar = call this.currentChar();
+            isIdent = call this.isIdent(currentChar)
+        done;
+
+        class Token token = new class Token(TOKEN_IDENTIFIER);
+        token.value = call value.asArray();
+
+        for i = 0 to len this.hardKeywords do
+            pair(string, enum token) p = this.hardKeywords[i];
+            string keywordString = fst p;
+            enum token keywordType = snd p;
+
+            bool matched = call this.checkHardKeyword(token, keywordString, keywordType);
+            if matched then
+                call value.destroy();
+                free value;
+                return token
+            else skip fi
+        done;
+
+        call value.destroy();
+        free value;
+        return token
+    end
+
+    bool checkHardKeyword(class Token token, string keyword, enum token type) is
+        if token.type == TOKEN_IDENTIFIER then
+            bool match = call stringEqualsCharArray(keyword, token.value);
+            if match then token.type = type; return true else skip fi
+        else skip fi;
+        return false
+    end
+
+    class Token parseCharLiteral() is
+        call this.advance();
+        char currentChar = call this.currentChar();
+        # Using '\'' broke the syntax highlighting, so this is a workaround for that
+        if ord currentChar == 39 then
+            println "Lexer encountered empty char literal";
+            exit 100
+        else skip fi;
+
+        if currentChar == '\"' then
+            println "Lexer encountered unescaped \" in char literal";
+            exit 100
+        else skip fi;
+
+        if currentChar == '\\' then
+            call this.advance();
+            currentChar = call this.currentChar();
+            currentChar = call this.escaped(currentChar)
+        else skip fi;
+        call this.closeCharLiteral();
+
+        class Token token = new class Token(TOKEN_CHAR_LITER);
+        token.value = [currentChar];
+        return token
+    end
+
+    void closeCharLiteral() is
+        call this.advance();
+        char currentChar = call this.currentChar();
+        # Using '\'' broke the syntax highlighting, so this is a workaround for that
+        if ord currentChar != 39 then
+            println "Lexer encountered unclosed char literal";
+            exit 100
+        else
+            call this.advance()
+        fi
+    end
+
+    class Token parseStringLiteral() is
+        class CharList value = new class CharList();
+
+        call this.advance();
+        char currentChar = call this.currentChar();
+
+        while currentChar != '\"' do
+            if currentChar == '\n' || currentChar == '\r' then
+                println "Lexer encountered newline in string literal";
+                exit 100
+            else skip fi;
+            # Using '\'' broke the syntax highlighting, so this is a workaround for that
+            if ord currentChar == 39 then
+                println "Lexer encountered unescaped \' in string literal";
+                exit 100
+            else skip fi;
+            if currentChar == '\\' then
+                call this.advance();
+                currentChar = call this.currentChar();
+                currentChar = call this.escaped(currentChar)
+            else skip fi;
+
+            call value.add(currentChar);
+            call this.advance();
+            currentChar = call this.currentChar()
+        done;
+        call this.advance();
+
+        class Token token = new class Token(TOKEN_STR_LITER);
+        token.value = call value.asArray();
+        call value.destroy();
+        free value;
+        return token
+    end
+
+    char escaped(char c) is
+        # Using '\'' broke the syntax highlighting, so this is a workaround for that
+        if ord c == 39 then return chr 39 else skip fi;
+
+        switch c matches
+            case '\"' do return '\"' end
+            case '\\' do return '\\' end
+            case '\\' do return '\\' end
+            case '0' do return '\0' end
+            case 'b' do return '\b' end
+            case 't' do return '\t' end
+            case 'n' do return '\n' end
+            case 'f' do return '\f' end
+            case 'r' do return '\r' end
+            default
+                println "Lexer encountered invalid escape character";
+                exit 100
+        end
+    end
+
+    class Token parseSingleCharToken(char c, enum token type) is
+        class Token token = new class Token(type);
+        token.value = [c];
+        call this.advance();
+        return token
+    end
+    
+    class Token parseDoubleCharToken(char c1, char c2, enum token type) is
+        class Token token = new class Token(type);
+        token.value = [c1, c2];
+        call this.advance();
+        call this.advance();
+        return token
+    end
+
+    class Token parseOrEqualsCharToken(char c, enum token withoutEquals, enum token withEquals) is
+        char next = call this.peek(1);
+        if next == '=' then class Token token = call this.parseDoubleCharToken(c, '=', withEquals); return token
+        else class Token token = call this.parseSingleCharToken(c, withoutEquals); return token fi
+    end
+
+end
+
+begin skip end

@@ -1,0 +1,2060 @@
+import SymbolTable.wacc
+import ThreeAddressCode.wacc
+
+enum type contains
+    TYPE_ARRAY, TYPE_PAIR, TYPE_INT, TYPE_CHAR, TYPE_BOOL, TYPE_STRING, TYPE_ANY
+end
+
+enum unaryOperator contains
+    UNOP_NOT, UNOP_NEGATE, UNOP_LEN, UNOP_ORD, UNOP_CHR
+end
+
+enum binaryOperator contains
+    BINOP_ADD, BINOP_SUBTRACT, BINOP_MULTIPLY, BINOP_DIVIDE, BINOP_MODULO,
+    BINOP_GTT, BINOP_GEQ, BINOP_LST, BINOP_LEQ, BINOP_EQT, BINOP_NEQ,
+    BINOP_AND, BINOP_OR
+end
+
+class Type contains
+    enum type type;
+    class Type leftInnerType;
+    class Type rightInnerType;
+
+    constructor(enum type type) is
+        this.type = type
+    end
+
+    void constructArrayType(class Type innerType) is
+        this.leftInnerType = innerType
+    end
+
+    void constructPairType(class Type firstType, class Type secondType) is
+        this.leftInnerType = firstType;
+        this.rightInnerType = secondType
+    end
+
+    void output() is
+        switch this.type matches
+            case TYPE_ANY do print "any" end
+            case TYPE_BOOL do print "bool" end
+            case TYPE_CHAR do print "char" end
+            case TYPE_INT do print "int" end
+            case TYPE_STRING do print "string" end
+            case TYPE_ARRAY do
+                class Type innerType = this.leftInnerType;
+                call innerType.output();
+                print "[]"
+            end
+            case TYPE_PAIR do
+                print "pair(";
+                class Type firstType = this.leftInnerType;
+                call firstType.output();
+                print ", ";
+                class Type secondType = this.rightInnerType;
+                call secondType.output();
+                print ")"
+            end
+            default skip
+        end
+    end
+
+    bool equals(class Type other) is
+        if this.type == TYPE_ANY then return true else skip fi;
+        if other.type == TYPE_ANY then return true else skip fi;
+
+        if this.type == TYPE_ARRAY && other.type == TYPE_ARRAY then
+            class Type t1 = this.leftInnerType;
+            bool eq = call t1.equals(other.leftInnerType);
+            return eq
+        else skip fi;
+
+        if this.type == TYPE_PAIR && other.type == TYPE_PAIR then
+            class Type t1 = this.leftInnerType;
+            class Type t2 = this.rightInnerType;
+            bool eq1 = call t1.equals(other.leftInnerType);
+            bool eq2 = call t2.equals(other.rightInnerType);
+            return eq1 && eq2
+        else skip fi;
+
+        return this.type == other.type
+    end
+end
+
+class RightSide contains
+    class Type type;
+    void output() is skip end
+    void buildSymbolTable(class SymbolTable symbolTable) is skip end
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is exit 1 end
+    void translateToTAC(class TACGenerator tacGenerator) is skip end
+end
+class Expression extends RightSide contains end
+class Literal extends Expression contains end
+class NullPair extends Literal contains 
+    void output() is print "null" end
+
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class Type type = new class Type(TYPE_PAIR);
+        class Type leftType = new class Type(TYPE_ANY);
+        class Type rightType = new class Type(TYPE_ANY);
+        call type.constructPairType(leftType, rightType);
+        this.type = type;
+        return type
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class ImmediateInteger i = new class ImmediateInteger(0);
+        class Temp temp = call tacGenerator.nextTemp();
+        class Assign assign = new class Assign(temp, i);
+        call tacGenerator.add(assign)
+    end
+end
+class Integer extends Literal contains
+    int value;
+    constructor(int value) is
+        this.value = value
+    end
+
+    void output() is print this.value end
+    
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class Type type = new class Type(TYPE_INT);
+        this.type = type;
+        return type
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class ImmediateInteger i = new class ImmediateInteger(this.value);
+        class Temp temp = call tacGenerator.nextTemp();
+        class Assign assign = new class Assign(temp, i);
+        call tacGenerator.add(assign)
+    end
+end
+class Boolean extends Literal contains
+    bool value;
+    constructor(bool value) is
+        this.value = value
+    end
+
+    void output() is print this.value end
+    
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class Type type = new class Type(TYPE_BOOL);
+        this.type = type;
+        return type
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class ImmediateBoolean b = new class ImmediateBoolean(this.value);
+        class Temp temp = call tacGenerator.nextTemp();
+        class Assign assign = new class Assign(temp, b);
+        call tacGenerator.add(assign)
+    end
+end
+class Character extends Literal contains
+    char value;
+    constructor(char value) is
+        this.value = value
+    end
+
+    void output() is
+        print "\'";
+        print this.value;
+        print "\'"
+    end
+    
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class Type type = new class Type(TYPE_CHAR);
+        this.type = type;
+        return type
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class ImmediateCharacter c = new class ImmediateCharacter(this.value);
+        class Temp temp = call tacGenerator.nextTemp();
+        class Assign assign = new class Assign(temp, c);
+        call tacGenerator.add(assign)
+    end
+end
+class String extends Literal contains
+    char[] value;
+    constructor(char[] value) is
+        this.value = value
+    end
+
+    void output() is
+        print "\"";
+        print this.value;
+        print "\""
+    end
+    
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class Type type = new class Type(TYPE_STRING);
+        this.type = type;
+        return type
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        int index = call tacGenerator.addString(this.value);
+        class ImmediateString s = new class ImmediateString(index);
+        class Temp temp = call tacGenerator.nextTemp();
+        class Assign assign = new class Assign(temp, s);
+        call tacGenerator.add(assign)
+    end
+end
+class ExpressionIdentifier extends Expression contains
+    char[] name;
+    int occurence;
+    constructor(char[] name) is
+        this.name = name;
+        this.occurence = 0
+    end
+
+    void output() is print this.name end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        this.occurence = call symbolTable.getOccurenceOf(this.name)
+    end
+    
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class Type type = call symbolTable.getSymbolType(this.name, this.occurence);
+        this.type = type;
+        return type
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class TACLeftSide ident = call tacGenerator.resolveIdentifier(this.name, this.occurence);
+        class Temp temp = call tacGenerator.nextTemp();
+        class Assign assign = new class Assign(temp, ident);
+        call tacGenerator.add(assign)
+    end
+end
+class ExpressionArrayElement extends Expression contains
+    class Identifier ident;
+    class Expression[] indices;
+    constructor(class Identifier ident, class Expression[] indices) is
+        this.ident = ident;
+        this.indices = indices
+    end
+
+    void output() is
+        class Identifier ident = this.ident;
+        call ident.output();
+        for i = 0 to len this.indices do
+            print "[";
+            class Expression index = this.indices[i];
+            call index.output();
+            print "]"
+        done
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class Identifier ident = this.ident;
+        call ident.buildSymbolTable(symbolTable);
+        for i = 0 to len this.indices do
+            class Expression index = this.indices[i];
+            call index.buildSymbolTable(symbolTable)
+        done
+    end
+    
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class Identifier ident = this.ident;
+        class Type type = call ident.getType(symbolTable, functions);
+
+        for i = 0 to len this.indices do
+            class Expression index = this.indices[i];
+            class Type indexType = call index.getType(symbolTable, functions);
+            if indexType.type != TYPE_INT then
+                println "Encountered non-integer array index";
+                exit 200
+            else skip fi;
+
+            if type.type == TYPE_ARRAY then
+                type = type.leftInnerType
+            else
+                println "Array element has too many indices";
+                exit 200
+            fi
+        done;
+
+        this.type = type;
+        return type
+    end
+
+    void translateToTAC(class TACGenerator tacGenerator) is
+        tacGenerator.overflowChecksAreMade = true;
+        class TACLeftSide arrayPointer = call tacGenerator.resolveIdentifier(this.ident.name, this.ident.occurence);
+        for i = 0 to len this.indices - 1 do
+            class Expression index = this.indices[i];
+            call index.translateToTAC(tacGenerator);
+            class Temp indexTemp = call tacGenerator.currentTemp();
+            enum wordSize wordSizeEnum = call sizeOf(TYPE_ARRAY);
+            int wordSizeInt = call wordSize(wordSizeEnum);
+            class ImmediateInteger size = new class ImmediateInteger(wordSizeInt);
+            class TACBinaryOperation multIndex = new class TACBinaryOperation(BINOP_MULTIPLY, indexTemp, size);
+
+            class Temp scaledIndexTemp = call tacGenerator.nextTemp();
+            class Assign assign = new class Assign(scaledIndexTemp, multIndex);
+            call tacGenerator.add(assign);
+
+            class Temp resultTemp = call tacGenerator.nextTemp();
+            class ContentsOf indirect = new class ContentsOf(arrayPointer, scaledIndexTemp, WORD_FULL);
+            assign = new class Assign(resultTemp, indirect);
+            call tacGenerator.add(assign);
+            arrayPointer = resultTemp
+        done;
+        class Expression index = this.indices[len this.indices - 1];
+        call index.translateToTAC(tacGenerator);
+        class Temp indexTemp = call tacGenerator.currentTemp();
+        enum wordSize wordSizeEnum = call sizeOf(this.type.type);
+        int wordSizeInt = call wordSize(wordSizeEnum);
+        class ImmediateInteger size = new class ImmediateInteger(wordSizeInt);
+        class TACBinaryOperation multIndex = new class TACBinaryOperation(BINOP_MULTIPLY, indexTemp, size);
+
+        class Temp scaledIndexTemp = call tacGenerator.nextTemp();
+        class Assign assign = new class Assign(scaledIndexTemp, multIndex);
+        call tacGenerator.add(assign);
+
+        class Temp resultTemp = call tacGenerator.nextTemp();
+        class ContentsOf indirect = new class ContentsOf(arrayPointer, scaledIndexTemp, WORD_FULL);
+        assign = new class Assign(resultTemp, indirect);
+        call tacGenerator.add(assign)
+    end
+end
+
+class UnaryOperation extends Expression contains
+    enum unaryOperator op;
+    class Expression expression;
+    constructor(enum unaryOperator op, class Expression expression) is
+        this.op = op;
+        this.expression = expression
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        if this.op == UNOP_NEGATE then
+            tacGenerator.overflowChecksAreMade = true
+        else skip fi;
+
+        class Expression expression = this.expression;
+        call expression.translateToTAC(tacGenerator);
+        class Temp argTemp = call tacGenerator.currentTemp();
+        class Temp resultTemp = call tacGenerator.nextTemp();
+        class TACUnaryOperation unOp = new class TACUnaryOperation(this.op, argTemp);
+        class Assign assign = new class Assign(resultTemp, unOp);
+        call tacGenerator.add(assign)
+    end
+
+    void output() is
+        switch this.op matches
+            case UNOP_CHR do print "chr " end
+            case UNOP_LEN do print "len " end
+            case UNOP_ORD do print "ord " end
+            case UNOP_NEGATE do print "-" end
+            case UNOP_NOT do print "!" end
+            default skip
+        end;
+        
+        class Expression expression = this.expression;
+        call expression.output()
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class Expression expression = this.expression;
+        call expression.buildSymbolTable(symbolTable)
+    end
+    
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class Expression expression = this.expression;
+        class Type exprType = call expression.getType(symbolTable, functions);
+        switch this.op matches
+            case UNOP_CHR do
+                if exprType.type == TYPE_INT then
+                    class Type type = new class Type(TYPE_CHAR);
+                    this.type = type;
+                    return type
+                else
+                    println "chr expected integer type";
+                    exit 200
+                fi
+            end
+            case UNOP_LEN do
+                if exprType.type == TYPE_ARRAY then
+                    class Type type = new class Type(TYPE_INT);
+                    this.type = type;
+                    return type
+                else
+                    println "len expected array type";
+                    exit 200
+                fi
+            end
+            case UNOP_NEGATE do
+                if exprType.type == TYPE_INT then
+                    class Type type = new class Type(TYPE_INT);
+                    this.type = type;
+                    return type
+                else
+                    println "negate expected integer type";
+                    exit 200
+                fi
+            end
+            case UNOP_NOT do
+                if exprType.type == TYPE_BOOL then
+                    class Type type = new class Type(TYPE_BOOL);
+                    this.type = type;
+                    return type
+                else
+                    println "not expected boolean type";
+                    exit 200
+                fi
+            end
+            case UNOP_ORD do
+                if exprType.type == TYPE_CHAR then
+                    class Type type = new class Type(TYPE_INT);
+                    this.type = type;
+                    return type
+                else
+                    println "ord expected character type";
+                    exit 200
+                fi
+            end
+            default exit 1
+        end
+    end
+end
+
+class BinaryOperation extends Expression contains
+    enum binaryOperator op;
+    class Expression left;
+    class Expression right;
+    constructor(enum binaryOperator op, class Expression left, class Expression right) is
+        this.op = op;
+        this.left = left;
+        this.right = right
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        if this.op == BINOP_ADD || this.op == BINOP_SUBTRACT || this.op == BINOP_MULTIPLY then
+            tacGenerator.overflowChecksAreMade = true
+        else if this.op == BINOP_DIVIDE || this.op == BINOP_MODULO then
+            tacGenerator.divideByZeroChecksAreMade = true
+        else skip fi fi;
+
+        class Expression left = this.left;
+        class Expression right = this.right;
+        call left.translateToTAC(tacGenerator);
+        class Temp leftTemp = call tacGenerator.currentTemp();
+        call right.translateToTAC(tacGenerator);
+        class Temp rightTemp = call tacGenerator.currentTemp();
+
+        class Temp resultTemp = call tacGenerator.nextTemp();
+        class TACBinaryOperation binOp = new class TACBinaryOperation(this.op, leftTemp, rightTemp);
+        class Assign assign = new class Assign(resultTemp, binOp);
+        call tacGenerator.add(assign)
+    end
+
+    void output() is
+        print "(";
+        class Expression left = this.left;
+        call left.output();
+
+        switch this.op matches
+            case BINOP_ADD do print " + " end
+            case BINOP_AND do print " && " end
+            case BINOP_DIVIDE do print " / " end
+            case BINOP_EQT do print " == " end
+            case BINOP_GEQ do print " >= " end
+            case BINOP_GTT do print " > " end
+            case BINOP_LEQ do print " <= " end
+            case BINOP_LST do print " < " end
+            case BINOP_MODULO do print " % " end
+            case BINOP_MULTIPLY do print " * " end
+            case BINOP_NEQ do print " != " end
+            case BINOP_OR do print " || " end
+            case BINOP_SUBTRACT do print " - " end
+            default skip
+        end;
+        
+        class Expression right = this.right;
+        call right.output();
+        print ")";
+    skip end
+    
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class Expression left = this.left;
+        class Expression right = this.right;
+        call left.buildSymbolTable(symbolTable);
+        call right.buildSymbolTable(symbolTable)
+    end
+
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class Expression left = this.left;
+        class Expression right = this.right;
+        class Type leftType = call left.getType(symbolTable, functions);
+        class Type rightType = call right.getType(symbolTable, functions);
+        switch this.op matches
+            case BINOP_ADD do
+                if leftType.type == TYPE_INT && rightType.type == TYPE_INT then
+                    class Type type = new class Type(TYPE_INT);
+                    this.type = type;
+                    return type
+                else
+                    println "add expected integer arguments";
+                    exit 200
+                fi
+            end
+            case BINOP_SUBTRACT do
+                if leftType.type == TYPE_INT && rightType.type == TYPE_INT then
+                    class Type type = new class Type(TYPE_INT);
+                    this.type = type;
+                    return type
+                else
+                    println "subtract expected integer arguments";
+                    exit 200
+                fi
+            end
+            case BINOP_MULTIPLY do
+                if leftType.type == TYPE_INT && rightType.type == TYPE_INT then
+                    class Type type = new class Type(TYPE_INT);
+                    this.type = type;
+                    return type
+                else
+                    println "multiply expected integer arguments";
+                    exit 200
+                fi
+            end
+            case BINOP_DIVIDE do
+                if leftType.type == TYPE_INT && rightType.type == TYPE_INT then
+                    class Type type = new class Type(TYPE_INT);
+                    this.type = type;
+                    return type
+                else
+                    println "divide expected integer arguments";
+                    exit 200
+                fi
+            end
+            case BINOP_MODULO do
+                if leftType.type == TYPE_INT && rightType.type == TYPE_INT then
+                    class Type type = new class Type(TYPE_INT);
+                    this.type = type;
+                    return type
+                else
+                    println "modulo expected integer arguments";
+                    exit 200
+                fi
+            end
+            case BINOP_EQT do
+                bool match = call leftType.equals(rightType);
+                if match then
+                    class Type type = new class Type(TYPE_BOOL);
+                    this.type = type;
+                    return type
+                else
+                    println "equal to expected same typed arguments";
+                    exit 200
+                fi
+            end
+            case BINOP_NEQ do
+                bool match = call leftType.equals(rightType);
+                if match then
+                    class Type type = new class Type(TYPE_BOOL);
+                    this.type = type;
+                    return type
+                else
+                    println "not equal to expected same typed arguments";
+                    exit 200
+                fi
+            end
+            case BINOP_GEQ do
+                bool match = call leftType.equals(rightType);
+                if match && leftType.type == TYPE_INT || leftType.type == TYPE_CHAR then
+                    class Type type = new class Type(TYPE_BOOL);
+                    this.type = type;
+                    return type
+                else
+                    println "greater or equal expected same typed, int or char arguments";
+                    exit 200
+                fi
+            end
+            case BINOP_GTT do
+                bool match = call leftType.equals(rightType);
+                if match && leftType.type == TYPE_INT || leftType.type == TYPE_CHAR then
+                    class Type type = new class Type(TYPE_BOOL);
+                    this.type = type;
+                    return type
+                else
+                    println "greater than expected same typed, int or char arguments";
+                    exit 200
+                fi
+            end
+            case BINOP_LEQ do
+                bool match = call leftType.equals(rightType);
+                if match && leftType.type == TYPE_INT || leftType.type == TYPE_CHAR then
+                    class Type type = new class Type(TYPE_BOOL);
+                    this.type = type;
+                    return type
+                else
+                    println "less or equal expected same typed, int or char arguments";
+                    exit 200
+                fi
+            end
+            case BINOP_LST do
+                bool match = call leftType.equals(rightType);
+                if match && leftType.type == TYPE_INT || leftType.type == TYPE_CHAR then
+                    class Type type = new class Type(TYPE_BOOL);
+                    this.type = type;
+                    return type
+                else
+                    println "less than expected same typed, int or char arguments";
+                    exit 200
+                fi
+            end
+            case BINOP_AND do
+                if leftType.type == TYPE_BOOL && rightType.type == TYPE_BOOL then
+                    class Type type = new class Type(TYPE_BOOL);
+                    this.type = type;
+                    return type
+                else
+                    println "and expected boolean arguments";
+                    exit 200
+                fi
+            end
+            case BINOP_OR do
+                if leftType.type == TYPE_BOOL && rightType.type == TYPE_BOOL then
+                    class Type type = new class Type(TYPE_BOOL);
+                    this.type = type;
+                    return type
+                else
+                    println "or expected boolean arguments";
+                    exit 200
+                fi
+            end
+            default exit 1
+        end
+    end
+end
+
+class LeftSide extends RightSide contains
+    void translateAssignmentToTAC(class TACGenerator tacGenerator, class Temp rightSide) is skip end
+end
+class Identifier extends LeftSide contains
+    char[] name;
+    int occurence;
+    constructor(char[] name) is
+        this.name = name;
+        this.occurence = 0
+    end
+
+    void output() is print this.name end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        this.occurence = call symbolTable.getOccurenceOf(this.name)
+    end
+
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class Type type = call symbolTable.getSymbolType(this.name, this.occurence);
+        this.type = type;
+        return type
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class TACLeftSide ident = call tacGenerator.resolveIdentifier(this.name, this.occurence);
+        class Temp temp = call tacGenerator.nextTemp();
+        class Assign assign = new class Assign(temp, ident);
+        call tacGenerator.add(assign)
+    end
+
+    void translateAssignmentToTAC(class TACGenerator tacGenerator, class Temp rightSide) is
+        class TACLeftSide leftSide = call tacGenerator.resolveIdentifier(this.name, this.occurence);
+        class Assign assign = new class Assign(leftSide, rightSide);
+        call tacGenerator.add(assign)
+    end
+end
+class ArrayElement extends LeftSide contains
+    class Identifier ident;
+    class Expression[] indices;
+    constructor(class Identifier ident, class Expression[] indices) is
+        this.ident = ident;
+        this.indices = indices
+    end
+
+    void output() is
+        class Identifier ident = this.ident;
+        call ident.output();
+        for i = 0 to len this.indices do
+            print "[";
+            class Expression index = this.indices[i];
+            call index.output();
+            print "]"
+        done
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class Identifier ident = this.ident;
+        call ident.buildSymbolTable(symbolTable);
+        for i = 0 to len this.indices do
+            class Expression index = this.indices[i];
+            call index.buildSymbolTable(symbolTable)
+        done
+    end
+    
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class Identifier ident = this.ident;
+        class Type type = call ident.getType(symbolTable, functions);
+
+        for i = 0 to len this.indices do
+            class Expression index = this.indices[i];
+            class Type indexType = call index.getType(symbolTable, functions);
+            if indexType.type != TYPE_INT then
+                println "Encountered non-integer array index";
+                exit 200
+            else skip fi;
+
+            if type.type == TYPE_ARRAY then
+                type = type.leftInnerType
+            else
+                println "Array element has too many indices";
+                exit 200
+            fi
+        done;
+
+        this.type = type;
+        return type
+    end
+
+    void translateToTAC(class TACGenerator tacGenerator) is
+        tacGenerator.overflowChecksAreMade = true;
+        class TACLeftSide arrayPointer = call tacGenerator.resolveIdentifier(this.ident.name, this.ident.occurence);
+        for i = 0 to len this.indices - 1 do
+            class Expression index = this.indices[i];
+            call index.translateToTAC(tacGenerator);
+            class Temp indexTemp = call tacGenerator.currentTemp();
+            enum wordSize wordSizeEnum = call sizeOf(TYPE_ARRAY);
+            int wordSizeInt = call wordSize(wordSizeEnum);
+            class ImmediateInteger size = new class ImmediateInteger(wordSizeInt);
+            class TACBinaryOperation multIndex = new class TACBinaryOperation(BINOP_MULTIPLY, indexTemp, size);
+
+            class Temp scaledIndexTemp = call tacGenerator.nextTemp();
+            class Assign assign = new class Assign(scaledIndexTemp, multIndex);
+            call tacGenerator.add(assign);
+
+            class Temp resultTemp = call tacGenerator.nextTemp();
+            class ContentsOf indirect = new class ContentsOf(arrayPointer, scaledIndexTemp, WORD_FULL);
+            assign = new class Assign(resultTemp, indirect);
+            call tacGenerator.add(assign);
+            arrayPointer = resultTemp
+        done;
+        class Expression index = this.indices[len this.indices - 1];
+        call index.translateToTAC(tacGenerator);
+        class Temp indexTemp = call tacGenerator.currentTemp();
+        enum wordSize wordSizeEnum = call sizeOf(this.type.type);
+        int wordSizeInt = call wordSize(wordSizeEnum);
+        class ImmediateInteger size = new class ImmediateInteger(wordSizeInt);
+        class TACBinaryOperation multIndex = new class TACBinaryOperation(BINOP_MULTIPLY, indexTemp, size);
+
+        class Temp scaledIndexTemp = call tacGenerator.nextTemp();
+        class Assign assign = new class Assign(scaledIndexTemp, multIndex);
+        call tacGenerator.add(assign);
+
+        class Temp resultTemp = call tacGenerator.nextTemp();
+        class ContentsOf indirect = new class ContentsOf(arrayPointer, scaledIndexTemp, WORD_FULL);
+        assign = new class Assign(resultTemp, indirect);
+        call tacGenerator.add(assign)
+    end
+    
+    void translateAssignmentToTAC(class TACGenerator tacGenerator, class Temp rightSide) is
+        tacGenerator.overflowChecksAreMade = true;
+        class TACLeftSide arrayPointer = call tacGenerator.resolveIdentifier(this.ident.name, this.ident.occurence);
+        for i = 0 to len this.indices - 1 do
+            class Expression index = this.indices[i];
+            call index.translateToTAC(tacGenerator);
+            class Temp indexTemp = call tacGenerator.currentTemp();
+            enum wordSize wordSizeEnum = call sizeOf(TYPE_ARRAY);
+            int wordSizeInt = call wordSize(wordSizeEnum);
+            class ImmediateInteger size = new class ImmediateInteger(wordSizeInt);
+            class TACBinaryOperation multIndex = new class TACBinaryOperation(BINOP_MULTIPLY, indexTemp, size);
+
+            class Temp scaledIndexTemp = call tacGenerator.nextTemp();
+            class Assign assign = new class Assign(scaledIndexTemp, multIndex);
+            call tacGenerator.add(assign);
+
+            class Temp resultTemp = call tacGenerator.nextTemp();
+            class ContentsOf indirect = new class ContentsOf(arrayPointer, scaledIndexTemp, WORD_FULL);
+            assign = new class Assign(resultTemp, indirect);
+            call tacGenerator.add(assign);
+            arrayPointer = resultTemp
+        done;
+        class Expression index = this.indices[len this.indices - 1];
+        call index.translateToTAC(tacGenerator);
+        class Temp indexTemp = call tacGenerator.currentTemp();
+        enum wordSize wordSizeEnum = call sizeOf(this.type.type);
+        int wordSizeInt = call wordSize(wordSizeEnum);
+        class ImmediateInteger size = new class ImmediateInteger(wordSizeInt);
+        class TACBinaryOperation multIndex = new class TACBinaryOperation(BINOP_MULTIPLY, indexTemp, size);
+
+        class Temp scaledIndexTemp = call tacGenerator.nextTemp();
+        class Assign assign = new class Assign(scaledIndexTemp, multIndex);
+        call tacGenerator.add(assign);
+
+        class WriteTo writeTo = new class WriteTo(arrayPointer, rightSide, scaledIndexTemp, wordSizeEnum);
+        call tacGenerator.add(writeTo)
+    end
+end
+class PairElement extends LeftSide contains
+    class LeftSide innerPair;
+    
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class LeftSide innerPair = this.innerPair;
+        call innerPair.buildSymbolTable(symbolTable)
+    end
+end
+class PairFirst extends PairElement contains
+    constructor(class LeftSide innerPair) is
+        this.innerPair = innerPair
+    end
+
+    void output() is
+        print "fst ";
+        class LeftSide innerPair = this.innerPair;
+        call innerPair.output()
+    end
+    
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class LeftSide innerPair = this.innerPair;
+        class Type innerPairType = call innerPair.getType(symbolTable, functions);
+        if innerPairType.type == TYPE_PAIR then
+            this.type = innerPairType.leftInnerType;
+            return innerPairType.leftInnerType
+        else
+            println "fst expected pair type";
+            exit 200
+        fi
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class LeftSide innerPair = this.innerPair;
+        call innerPair.translateToTAC(tacGenerator);
+        class Temp innerPairTemp = call tacGenerator.currentTemp();
+        class Temp resultTemp = call tacGenerator.nextTemp();
+        class ImmediateInteger offset = new class ImmediateInteger(0);
+        class ContentsOf contentsOf = new class ContentsOf(innerPairTemp, offset, WORD_FULL);
+        class Assign assign = new class Assign(resultTemp, contentsOf);
+        call tacGenerator.add(assign)
+    end
+
+    void translateAssignmentToTAC(class TACGenerator tacGenerator, class Temp rightSide) is
+        class LeftSide innerPair = this.innerPair;
+        call innerPair.translateToTAC(tacGenerator);
+        class Temp pointer = call tacGenerator.currentTemp();
+        class ImmediateInteger offset = new class ImmediateInteger(0);
+        enum wordSize size = call sizeOf(this.type.type);
+        class WriteTo writeTo = new class WriteTo(pointer, rightSide, offset, WORD_FULL);
+        call tacGenerator.add(writeTo)
+    end
+end
+class PairSecond extends PairElement contains
+    constructor(class LeftSide innerPair) is
+        this.innerPair = innerPair
+    end
+    
+    void output() is
+        print "snd ";
+        class LeftSide innerPair = this.innerPair;
+        call innerPair.output()
+    end
+
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class LeftSide innerPair = this.innerPair;
+        class Type innerPairType = call innerPair.getType(symbolTable, functions);
+        if innerPairType.type == TYPE_PAIR then
+            this.type = innerPairType.rightInnerType;
+            return innerPairType.rightInnerType
+        else
+            println "snd expected pair type";
+            exit 200
+        fi
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class LeftSide innerPair = this.innerPair;
+        call innerPair.translateToTAC(tacGenerator);
+        class Temp innerPairTemp = call tacGenerator.currentTemp();
+        class Temp resultTemp = call tacGenerator.nextTemp();
+        class ImmediateInteger offset = new class ImmediateInteger(4);
+        class ContentsOf contentsOf = new class ContentsOf(innerPairTemp, offset, WORD_FULL);
+        class Assign assign = new class Assign(resultTemp, contentsOf);
+        call tacGenerator.add(assign)
+    end
+
+    void translateAssignmentToTAC(class TACGenerator tacGenerator, class Temp rightSide) is
+        class LeftSide innerPair = this.innerPair;
+        call innerPair.translateToTAC(tacGenerator);
+        class Temp pointer = call tacGenerator.currentTemp();
+        class ImmediateInteger offset = new class ImmediateInteger(4);
+        enum wordSize size = call sizeOf(this.type.type);
+        class WriteTo writeTo = new class WriteTo(pointer, rightSide, offset, WORD_FULL);
+        call tacGenerator.add(writeTo)
+    end
+end
+
+class ArrayLiteral extends RightSide contains
+    enum type elemType;
+    class Expression[] elements;
+    constructor(class Expression[] elements) is
+        this.elemType = TYPE_ANY;
+        this.elements = elements
+    end
+
+    void output() is
+        print "[";
+        if len this.elements >= 1 then
+            class Expression element = this.elements[0];
+            call element.output();
+            for i = 1 to len this.elements do
+                print ", ";
+                element = this.elements[i];
+                call element.output()
+            done
+        else skip fi;
+        print "]"
+    end
+    
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        for i = 0 to len this.elements do
+            class Expression element = this.elements[i];
+            call element.buildSymbolTable(symbolTable)
+        done
+    end
+    
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class Type type = new class Type(TYPE_ARRAY);
+        if len this.elements == 0 then
+            class Type innerType = new class Type(TYPE_ANY);
+            call type.constructArrayType(innerType)
+        else
+            class Expression element = this.elements[0];
+            class Type innerType = call element.getType(symbolTable, functions);
+            this.elemType = innerType.type;
+            for i = 1 to len this.elements do
+                element = this.elements[i];
+                class Type elemType = call element.getType(symbolTable, functions);
+                bool match = call elemType.equals(innerType);
+                if !match then
+                    println "Array literal elements did not match types";
+                    exit 200
+                else skip fi
+            done;
+            call type.constructArrayType(innerType)
+        fi;
+        this.type = type;
+        return type
+    end
+
+    void translateToTAC(class TACGenerator tacGenerator) is
+        enum wordSize intWordSize = call sizeOf(TYPE_INT);
+        int intSize = call wordSize(intWordSize);
+        class ImmediateInteger offset = new class ImmediateInteger(0);
+        class ImmediateInteger length = new class ImmediateInteger(len this.elements);
+        class Temp pointer = call tacGenerator.nextTemp();
+        if this.elemType == TYPE_ANY then
+            class AllocateHeap alloc = new class AllocateHeap(intSize);
+            class Assign assign = new class Assign(pointer, alloc);
+            call tacGenerator.add(assign);
+            class WriteTo writeTo = new class WriteTo(pointer, length, offset, intWordSize);
+            call tacGenerator.add(writeTo)
+        else
+            enum wordSize elemWordSize = call sizeOf(this.elemType);
+            int elemSize = call wordSize(elemWordSize);
+            class AllocateHeap alloc = new class AllocateHeap(intSize + (len this.elements * elemSize));
+            class Assign assign = new class Assign(pointer, alloc);
+            call tacGenerator.add(assign);
+            class WriteTo writeTo = new class WriteTo(pointer, length, offset, intWordSize);
+            call tacGenerator.add(writeTo);
+            for i = 0 to len this.elements do
+                class Expression element = this.elements[i];
+                call element.translateToTAC(tacGenerator);
+                class Temp elementTemp = call tacGenerator.currentTemp();
+                offset = new class ImmediateInteger(intSize + (i * elemSize));
+                writeTo = new class WriteTo(pointer, elementTemp, offset, elemWordSize);
+                call tacGenerator.add(writeTo)
+            done
+        fi;
+        class ImmediateInteger shiftBy = new class ImmediateInteger(intSize);
+        class TACBinaryOperation shift = new class TACBinaryOperation(BINOP_ADD, pointer, shiftBy);
+        class Temp resultTemp = call tacGenerator.nextTemp();
+        class Assign assign = new class Assign(resultTemp, shift);
+        call tacGenerator.add(assign)
+    end
+end
+class NewPair extends RightSide contains
+    class Expression first;
+    class Expression second;
+    constructor(class Expression first, class Expression second) is
+        this.first = first;
+        this.second = second
+    end
+
+    void output() is
+        class Expression first = this.first;
+        class Expression second = this.second;
+        print "newpair(";
+        call first.output();
+        print ", ";
+        call second.output();
+        print ")"
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class Expression first = this.first;
+        class Expression second = this.second;
+        call first.buildSymbolTable(symbolTable);
+        call second.buildSymbolTable(symbolTable)
+    end
+    
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class Expression first = this.first;
+        class Expression second = this.second;
+        class Type firstType = call first.getType(symbolTable, functions);
+        class Type secondType = call second.getType(symbolTable, functions);
+        class Type type = new class Type(TYPE_PAIR);
+        call type.constructPairType(firstType, secondType);
+        this.type = type;
+        return type
+    end
+
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class Expression first = this.first;
+        call first.translateToTAC(tacGenerator);
+        class Temp firstTemp = call tacGenerator.currentTemp();
+        class Expression second = this.second;
+        call second.translateToTAC(tacGenerator);
+        class Temp secondTemp = call tacGenerator.currentTemp();
+        int elemSize = call wordSize(WORD_FULL);
+        class AllocateHeap alloc = new class AllocateHeap(2 * elemSize);
+        class Temp pointer = call tacGenerator.nextTemp();
+        class Assign assign = new class Assign(pointer, alloc);
+        call tacGenerator.add(assign);
+        
+        class ImmediateInteger offset = new class ImmediateInteger(0);
+        class WriteTo writeTo = new class WriteTo(pointer, firstTemp, offset, WORD_FULL);
+        call tacGenerator.add(writeTo);
+        offset = new class ImmediateInteger(elemSize);
+        writeTo = new class WriteTo(pointer, secondTemp, offset, WORD_FULL);
+        call tacGenerator.add(writeTo)
+    end
+end
+class FunctionCall extends RightSide contains
+    char[] functionName;
+    class Expression[] arguments;
+    constructor(char[] functionName, class Expression[] arguments) is
+        this.functionName = functionName;
+        this.arguments = arguments
+    end
+
+    void output() is
+        print "call ";
+        print this.functionName;
+        print "(";
+        if len this.arguments >= 1 then
+            class Expression argument = this.arguments[0];
+            call argument.output();
+            for i = 1 to len this.arguments do
+                print ", ";
+                argument = this.arguments[i];
+                call argument.output()
+            done
+        else skip fi;
+        print ")"
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        for i = 0 to len this.arguments do
+            class Expression argument = this.arguments[i];
+            call argument.buildSymbolTable(symbolTable)
+        done
+    end
+    
+    class Type getType(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        class FunctionDefinition function = call getFunction(this.functionName, functions);
+        if len this.arguments != len function.params then
+            print "Number of arguments did not match parameters in call to ";
+            println function.name;
+            exit 200
+        else skip fi;
+
+        for i = 0 to len this.arguments do
+            class Expression argument = this.arguments[i];
+            class Type argType = call argument.getType(symbolTable, functions);
+            class Parameter parameter = function.params[i];
+            bool match = call argType.equals(parameter.type);
+            if !match then
+                print "Argument types did not match parameter types in call to ";
+                println function.name;
+                exit 200
+            else skip fi
+        done;
+
+        this.type = function.returnType;
+        return function.returnType
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        for i = 0 to len this.arguments do
+            class Expression argument = this.arguments[len this.arguments - i - 1];
+            call argument.translateToTAC(tacGenerator);
+            class Temp argTemp = call tacGenerator.currentTemp();
+            class AddParameter addParameter = new class AddParameter(argTemp);
+            call tacGenerator.add(addParameter)
+        done;
+        class JumpToSubroutine jsr = new class JumpToSubroutine(this.functionName);
+        call tacGenerator.add(jsr);
+        class LoadReturnValue loadReturn = new class LoadReturnValue();
+        class Temp resultTemp = call tacGenerator.nextTemp();
+        class Assign assign = new class Assign(resultTemp, loadReturn);
+        call tacGenerator.add(assign)
+    end
+end
+
+class Statement contains
+    void output() is skip end
+    bool returnsOrExits() is return false end
+    void buildSymbolTable(class SymbolTable symbolTable) is skip end
+    void semanticCheck(class SymbolTable symbolTable, class FunctionDefinition[] functions, class Type returnType) is skip end
+    void translateToTAC(class TACGenerator tacGenerator) is skip end
+end
+class Skip extends Statement contains
+    void output() is print "skip" end
+end
+class Assignment extends Statement contains
+    class LeftSide leftSide;
+    class RightSide rightSide;
+    constructor(class LeftSide leftSide, class RightSide rightSide) is
+        this.leftSide = leftSide;
+        this.rightSide = rightSide
+    end
+
+    void output() is
+        class LeftSide leftSide = this.leftSide;
+        class RightSide rightSide = this.rightSide;
+        call leftSide.output();
+        print " = ";
+        call rightSide.output()
+    end
+    
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class LeftSide leftSide = this.leftSide;
+        class RightSide rightSide = this.rightSide;
+        call leftSide.buildSymbolTable(symbolTable);
+        call rightSide.buildSymbolTable(symbolTable)
+    end
+
+    void semanticCheck(class SymbolTable symbolTable, class FunctionDefinition[] functions, class Type returnType) is
+        class LeftSide leftSide = this.leftSide;
+        class RightSide rightSide = this.rightSide;
+        class Type leftType = call leftSide.getType(symbolTable, functions);
+        class Type rightType = call rightSide.getType(symbolTable, functions);
+
+        if leftType.type == TYPE_ANY && rightType.type == TYPE_ANY then
+            println "Invalid assignment, types of both sides are unknown";
+            exit 200
+        else skip fi;
+
+        bool match = call leftType.equals(rightType);
+        if !match then
+            println "Left type did not match right type in assignment";
+            exit 200
+        else skip fi
+    end
+
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class LeftSide leftSide = this.leftSide;
+        class RightSide rightSide = this.rightSide;
+        call rightSide.translateToTAC(tacGenerator);
+        class Temp rightTemp = call tacGenerator.currentTemp();
+        call leftSide.translateAssignmentToTAC(tacGenerator, rightTemp)
+    end
+end
+class Declaration extends Statement contains
+    class Type type;
+    class Identifier ident;
+    class RightSide rightSide;
+    constructor(class Type type, class Identifier ident, class RightSide rightSide) is
+        this.type = type;
+        this.ident = ident;
+        this.rightSide = rightSide
+    end
+
+    void output() is
+        class Type type = this.type;
+        class Identifier ident = this.ident;
+        class RightSide rightSide = this.rightSide;
+        call type.output();
+        print " ";
+        call ident.output();
+        print " = ";
+        call rightSide.output()
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class RightSide rightSide = this.rightSide;
+        this.ident.occurence = call symbolTable.declare(this.type, this.ident);
+        call rightSide.buildSymbolTable(symbolTable)
+    end
+    
+    void semanticCheck(class SymbolTable symbolTable, class FunctionDefinition[] functions, class Type returnType) is
+        class Identifier identifier = this.ident;
+        class RightSide rightSide = this.rightSide;
+        class Type identType = call identifier.getType(symbolTable, functions);
+        class Type rightType = call rightSide.getType(symbolTable, functions);
+        bool match = call identType.equals(rightType);
+        if !match then
+            println "Stated type did not match right type in declaration";
+            exit 200
+        else skip fi
+    end
+
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class Identifier ident = this.ident;
+        class RightSide rightSide = this.rightSide;
+        call rightSide.translateToTAC(tacGenerator);
+        class Temp rightTemp = call tacGenerator.currentTemp();
+        call ident.translateAssignmentToTAC(tacGenerator, rightTemp)
+    end
+end
+class ReadInput extends Statement contains
+    class LeftSide leftSide;
+    constructor(class LeftSide leftSide) is
+        this.leftSide = leftSide
+    end
+
+    void output() is
+        class LeftSide leftSide = this.leftSide;
+        print "read ";
+        call leftSide.output()
+    end
+    
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class LeftSide leftSide = this.leftSide;
+        call leftSide.buildSymbolTable(symbolTable)
+    end
+    
+    void semanticCheck(class SymbolTable symbolTable, class FunctionDefinition[] functions, class Type returnType) is
+        class LeftSide leftSide = this.leftSide;
+        class Type leftType = call leftSide.getType(symbolTable, functions);
+        if leftType.type != TYPE_INT && leftType.type != TYPE_CHAR then
+            println "read expected character or integer type";
+            exit 200
+        else skip fi
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class Temp readTemp = call tacGenerator.nextTemp();
+        class LeftSide leftSide = this.leftSide;
+        if leftSide.type.type == TYPE_INT then
+            class TACRead tacRead = new class TACRead(READ_INT);
+            class Assign assign = new class Assign(readTemp, tacRead);
+            call tacGenerator.add(assign)
+        else if leftSide.type.type == TYPE_INT then
+            class TACRead tacRead = new class TACRead(READ_CHAR);
+            class Assign assign = new class Assign(readTemp, tacRead);
+            call tacGenerator.add(assign)
+        else skip fi fi;
+        call leftSide.translateAssignmentToTAC(tacGenerator, readTemp)
+    end
+end
+class FreeMemory extends Statement contains
+    class Expression expression;
+    constructor(class Expression expression) is
+        this.expression = expression
+    end
+    
+    void output() is
+        class Expression expression = this.expression;
+        print "free ";
+        call expression.output()
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class Expression expression = this.expression;
+        call expression.buildSymbolTable(symbolTable)
+    end
+    
+    void semanticCheck(class SymbolTable symbolTable, class FunctionDefinition[] functions, class Type returnType) is
+        class Expression expression = this.expression;
+        class Type exprType = call expression.getType(symbolTable, functions);
+        if exprType.type != TYPE_ARRAY && exprType.type != TYPE_PAIR then
+            println "free expected array or pair type";
+            exit 200
+        else skip fi
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class Expression expression = this.expression;
+        call expression.translateToTAC(tacGenerator);
+        class Temp exprTemp = call tacGenerator.currentTemp();
+
+        if this.expression.type.type == TYPE_ARRAY then
+            enum wordSize intWordSize = call sizeOf(TYPE_INT);
+            int intSize = call wordSize(intWordSize);
+            class ImmediateInteger shiftBy = new class ImmediateInteger(intSize);
+            class TACBinaryOperation shift = new class TACBinaryOperation(BINOP_SUBTRACT, exprTemp, shiftBy);
+            class Temp pointer = call tacGenerator.nextTemp();
+            class Assign assign = new class Assign(pointer, shift);
+            call tacGenerator.add(assign);
+            class TACFree freee = new class TACFree(pointer);
+            call tacGenerator.add(freee)
+        else if this.expression.type.type == TYPE_PAIR then
+            class TACFree freee = new class TACFree(exprTemp);
+            call tacGenerator.add(freee)
+        else skip fi fi
+    end
+end
+class Return extends Statement contains
+    class Expression expression;
+    constructor(class Expression expression) is
+        this.expression = expression
+    end
+    
+    void output() is
+        class Expression expression = this.expression;
+        print "return ";
+        call expression.output()
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class Expression expression = this.expression;
+        call expression.buildSymbolTable(symbolTable)
+    end
+    
+    void semanticCheck(class SymbolTable symbolTable, class FunctionDefinition[] functions, class Type returnType) is
+        if returnType.type == TYPE_ANY then
+            println "Could not resolve expected return type, possibly return in global context";
+            exit 200
+        else skip fi;
+
+        class Expression expression = this.expression;
+        class Type exprType = call expression.getType(symbolTable, functions);
+        bool match = call exprType.equals(returnType);
+        if !match then
+            println "return expression did not match return type";
+            exit 200
+        else skip fi
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class Expression expression = this.expression;
+        call expression.translateToTAC(tacGenerator);
+        class Temp exprTemp = call tacGenerator.currentTemp();
+        class StoreReturnValue storeReturn = new class StoreReturnValue(exprTemp);
+        class ReturnFromSubroutine rts = new class ReturnFromSubroutine();
+        call tacGenerator.add(storeReturn);
+        call tacGenerator.add(rts)
+    end
+    
+    bool returnsOrExits() is return true end
+end
+class Exit extends Statement contains
+    class Expression expression;
+    constructor(class Expression expression) is
+        this.expression = expression
+    end
+    
+    void output() is
+        class Expression expression = this.expression;
+        print "exit ";
+        call expression.output()
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class Expression expression = this.expression;
+        call expression.buildSymbolTable(symbolTable)
+    end
+    
+    void semanticCheck(class SymbolTable symbolTable, class FunctionDefinition[] functions, class Type returnType) is
+        class Expression expression = this.expression;
+        class Type exprType = call expression.getType(symbolTable, functions);
+        if exprType.type != TYPE_INT then
+            println "exit expected integer type";
+            exit 200
+        else skip fi
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class Expression expression = this.expression;
+        call expression.translateToTAC(tacGenerator);
+        class Temp exprTemp = call tacGenerator.currentTemp();
+        class TACExit exitt = new class TACExit(exprTemp);
+        call tacGenerator.add(exitt)
+    end
+
+    bool returnsOrExits() is return true end
+end
+class Print extends Statement contains
+    class Type type;
+    class Expression expression;
+    constructor(class Expression expression) is
+        this.expression = expression
+    end
+    
+    void output() is
+        class Expression expression = this.expression;
+        print "print ";
+        call expression.output()
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class Expression expression = this.expression;
+        call expression.buildSymbolTable(symbolTable)
+    end
+    
+    void semanticCheck(class SymbolTable symbolTable, class FunctionDefinition[] functions, class Type returnType) is
+        class Expression expression = this.expression;
+        class Type exprType = call expression.getType(symbolTable, functions);
+        this.type = exprType
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        enum printType printType = PRINT_INT;
+        switch this.type.type matches
+            case TYPE_ARRAY do
+                if this.type.leftInnerType.type == TYPE_CHAR then printType = PRINT_CHAR_ARRAY
+                else printType = PRINT_REFERENCE fi
+            end
+            case TYPE_BOOL do printType = PRINT_BOOL end
+            case TYPE_CHAR do printType = PRINT_CHAR end
+            case TYPE_INT do printType = PRINT_INT end
+            case TYPE_PAIR do printType = PRINT_REFERENCE end
+            case TYPE_STRING do printType = PRINT_STRING end
+            default skip
+        end;
+
+        class Expression expression = this.expression;
+        call expression.translateToTAC(tacGenerator);
+        class Temp exprTemp = call tacGenerator.currentTemp();
+        class TACPrint printt = new class TACPrint(printType, exprTemp, false);
+        call tacGenerator.add(printt)
+    end
+end
+class PrintLine extends Statement contains
+    class Type type;
+    class Expression expression;
+    constructor(class Expression expression) is
+        this.expression = expression
+    end
+    
+    void output() is
+        class Expression expression = this.expression;
+        print "println ";
+        call expression.output()
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class Expression expression = this.expression;
+        call expression.buildSymbolTable(symbolTable)
+    end
+    
+    void semanticCheck(class SymbolTable symbolTable, class FunctionDefinition[] functions, class Type returnType) is
+        class Expression expression = this.expression;
+        class Type exprType = call expression.getType(symbolTable, functions);
+        this.type = exprType
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        enum printType printType = PRINT_INT;
+        switch this.type.type matches
+            case TYPE_ARRAY do
+                if this.type.leftInnerType.type == TYPE_CHAR then printType = PRINT_CHAR_ARRAY
+                else printType = PRINT_REFERENCE fi
+            end
+            case TYPE_BOOL do printType = PRINT_BOOL end
+            case TYPE_CHAR do printType = PRINT_CHAR end
+            case TYPE_INT do printType = PRINT_INT end
+            case TYPE_PAIR do printType = PRINT_REFERENCE end
+            case TYPE_STRING do printType = PRINT_STRING end
+            default skip
+        end;
+
+        class Expression expression = this.expression;
+        call expression.translateToTAC(tacGenerator);
+        class Temp exprTemp = call tacGenerator.currentTemp();
+        class TACPrint printt = new class TACPrint(printType, exprTemp, true);
+        call tacGenerator.add(printt)
+    end
+end
+class If extends Statement contains
+    class Expression condition;
+    class StatementBlock truBlock;
+    class StatementBlock falBlock;
+    constructor(class Expression condition, class StatementBlock truBlock, class StatementBlock falBlock) is
+        this.condition = condition;
+        this.truBlock = truBlock;
+        this.falBlock = falBlock
+    end
+    
+    void output() is
+        class Expression condition = this.condition;
+        class StatementBlock truBlock = this.truBlock;
+        class StatementBlock falBlock = this.falBlock;
+        print "if ";
+        call condition.output();
+        print " then\n";
+        call truBlock.output();
+        print "else\n";
+        call falBlock.output();
+        print "fi"
+    end
+    
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class Expression condition = this.condition;
+        class StatementBlock truBlock = this.truBlock;
+        class StatementBlock falBlock = this.falBlock;
+        call condition.buildSymbolTable(symbolTable);
+        call truBlock.buildSymbolTable(symbolTable);
+        call falBlock.buildSymbolTable(symbolTable)
+    end
+    
+    void semanticCheck(class SymbolTable symbolTable, class FunctionDefinition[] functions, class Type returnType) is
+        class Expression condition = this.condition;
+        class Type condType = call condition.getType(symbolTable, functions);
+        if condType.type != TYPE_BOOL then
+            println "if expected boolean type condition";
+            exit 200
+        else skip fi;
+        class StatementBlock truBlock = this.truBlock;
+        class StatementBlock falBlock = this.falBlock;
+        call truBlock.semanticCheck(symbolTable, functions, returnType);
+        call falBlock.semanticCheck(symbolTable, functions, returnType)
+    end
+
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class Expression condition = this.condition;
+        class StatementBlock truBlock = this.truBlock;
+        class StatementBlock falBlock = this.falBlock;
+
+        class TACLabel truLabel = call tacGenerator.nextLabel();
+        class TACLabel exitLabel = call tacGenerator.nextLabel();
+
+        call condition.translateToTAC(tacGenerator);
+        class Temp conditionTemp = call tacGenerator.currentTemp();
+        class JumpCondition jmpCondTru = new class JumpCondition(conditionTemp, truLabel);
+        class Jump jmpExit = new class Jump(exitLabel);
+
+        call tacGenerator.add(jmpCondTru);
+        call falBlock.translateToTAC(tacGenerator);
+        call tacGenerator.add(jmpExit);
+        call tacGenerator.add(truLabel);
+        call truBlock.translateToTAC(tacGenerator);
+        call tacGenerator.add(exitLabel)
+    end
+    
+    bool returnsOrExits() is
+        class StatementBlock truBlock = this.truBlock;
+        class StatementBlock falBlock = this.falBlock;
+        bool truReturnsOrExits = call truBlock.returnsOrExits();
+        bool falReturnsOrExits = call falBlock.returnsOrExits();
+        return truReturnsOrExits && falReturnsOrExits
+    end
+end
+class While extends Statement contains
+    class Expression condition;
+    class StatementBlock loopBody;
+    constructor(class Expression condition, class StatementBlock loopBody) is
+        this.condition = condition;
+        this.loopBody = loopBody
+    end
+
+    void output() is
+        class Expression condition = this.condition;
+        class StatementBlock loopBody = this.loopBody;
+        print "while ";
+        call condition.output();
+        print " do\n";
+        call loopBody.output();
+        print "done"
+    end
+    
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class Expression condition = this.condition;
+        class StatementBlock loopBody = this.loopBody;
+        call condition.buildSymbolTable(symbolTable);
+        call loopBody.buildSymbolTable(symbolTable)
+    end
+    
+    void semanticCheck(class SymbolTable symbolTable, class FunctionDefinition[] functions, class Type returnType) is
+        class Expression condition = this.condition;
+        class Type condType = call condition.getType(symbolTable, functions);
+        if condType.type != TYPE_BOOL then
+            println "while expected boolean type condition";
+            exit 200
+        else skip fi;
+        class StatementBlock loopBody = this.loopBody;
+        call loopBody.semanticCheck(symbolTable, functions, returnType)
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class Expression condition = this.condition;
+        class StatementBlock loopBody = this.loopBody;
+
+        class TACLabel startLabel = call tacGenerator.nextLabel();
+        class TACLabel conditionLabel = call tacGenerator.nextLabel();
+        class Jump jmpCond = new class Jump(conditionLabel);
+        call tacGenerator.add(jmpCond);
+        call tacGenerator.add(startLabel);
+        call loopBody.translateToTAC(tacGenerator);
+        call tacGenerator.add(conditionLabel);
+        call condition.translateToTAC(tacGenerator);
+        class Temp conditionTemp = call tacGenerator.currentTemp();
+        class JumpCondition jmpStart = new class JumpCondition(conditionTemp, startLabel);
+        call tacGenerator.add(jmpStart)
+    end
+
+    bool returnsOrExits() is
+        class StatementBlock loopBody = this.loopBody;
+        bool returnsOrExits = call loopBody.returnsOrExits();
+        return returnsOrExits
+    end
+end
+class StatementBlock extends Statement contains
+    class Statement[] array;
+    int length;
+
+    constructor() is
+        this.length = 0;
+        this.array = newarray(1);
+    skip end
+
+    void output() is
+        print "begin\n";
+        if this.length >= 1 then
+            print "\t";
+            class Statement statement = this.array[0];
+            call statement.output();
+            for i = 1 to this.length do
+                print ";\n\t";
+                statement = this.array[i];
+                call statement.output()
+            done
+        else skip fi;
+        print "\nend\n"
+    end
+    
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        call symbolTable.enterScope();
+        for i = 0 to this.length do
+            class Statement statement = this.array[i];
+            call statement.buildSymbolTable(symbolTable)
+        done;
+        call symbolTable.exitScope()
+    end
+    
+    void semanticCheck(class SymbolTable symbolTable, class FunctionDefinition[] functions, class Type returnType) is
+        for i = 0 to this.length do
+            class Statement statement = this.array[i];
+            call statement.semanticCheck(symbolTable, functions, returnType)
+        done
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        for i = 0 to this.length do
+            class Statement statement = this.array[i];
+            call statement.translateToTAC(tacGenerator)
+        done
+    end
+
+    bool returnsOrExits() is
+        if this.length == 0 then return true
+        else skip fi;
+        class Statement last = this.array[this.length - 1];
+        bool returnsOrExits = call last.returnsOrExits();
+        return returnsOrExits
+    end
+
+    void add(class Statement c) is
+        if this.length == len this.array then
+            class Statement[] nextArray = newarray(this.length * 2);
+            for i = 0 to this.length do
+                nextArray[i] = this.array[i];
+            skip done;
+            free this.array;
+            this.array = nextArray;
+        skip else skip fi;
+        this.array[this.length] = c;
+        this.length = this.length + 1;
+    skip end
+
+    class Statement[] asArray() is
+        class Statement[] array = newarray(this.length);
+        for i = 0 to this.length do
+            array[i] = this.array[i]
+        done;
+        return array
+    end
+
+    class Statement get(int i) is
+        if i < 0 || i >= this.length then
+            println "StatementBlock.get(i) error: Index out of bounds";
+            exit 1
+        else
+            return this.array[i]
+        fi
+    end
+
+    void destroy() is
+        for i = 0 to this.length do
+            free this.array[i]
+        done;
+        free this.array
+    end
+end
+
+class Parameter contains
+    class Type type;
+    class Identifier ident;
+    constructor(class Type type, class Identifier ident) is
+        this.type = type;
+        this.ident = ident
+    end
+
+    void output() is
+        class Type type = this.type;
+        class Identifier ident = this.ident;
+        call type.output();
+        print " ";
+        call ident.output()
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        this.ident.occurence = call symbolTable.declare(this.type, this.ident)
+    end
+end
+class FunctionDefinition contains
+    class Type returnType;
+    char[] name;
+    class Parameter[] params;
+    class StatementBlock body;
+    constructor(class Type returnType, char[] name, class Parameter[] params, class StatementBlock body) is
+        this.returnType = returnType;
+        this.name = name;
+        this.params = params;
+        this.body = body
+    end
+
+    void output() is
+        class Type returnType = this.returnType;
+        class StatementBlock body = this.body;
+        call returnType.output();
+        print " ";
+        print this.name;
+        print "(";
+        if len this.params >= 1 then
+            class Parameter parameter = this.params[0];
+            call parameter.output()
+        else skip fi;
+        for i = 1 to len this.params do
+            print ", ";
+            class Parameter parameter = this.params[i];
+            call parameter.output()
+        done;
+        print ") is ";
+        call body.output()
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        call symbolTable.enterScope();
+        for i = 0 to len this.params do
+            class Parameter parameter = this.params[i];
+            call parameter.buildSymbolTable(symbolTable)
+        done;
+        class StatementBlock body = this.body;
+        call body.buildSymbolTable(symbolTable);
+        call symbolTable.exitScope()
+    end
+    
+    void semanticCheck(class SymbolTable symbolTable, class FunctionDefinition[] functions) is
+        for i = 0 to len this.params do
+            for j = i + 1 to len this.params do
+                class Parameter p1 = this.params[i];
+                class Parameter p2 = this.params[j];
+                bool match = call charArrayEqualsCharArray(p1.ident.name, p2.ident.name);
+                if match then
+                    print "Duplicate parameter names ";
+                    print p1.ident.name;
+                    print " in function ";
+                    println this.name;
+                    exit 200
+                else skip fi
+            done
+        done;
+
+        class StatementBlock body = this.body;
+        call body.semanticCheck(symbolTable, functions, this.returnType)
+    end
+    
+    void translateToTAC(class TACGenerator tacGenerator) is
+        class StatementBlock body = this.body;
+        tacGenerator.paramList = this.params;
+        class EnterSubroutine enterSubroutine = new class EnterSubroutine(this.name);
+        call tacGenerator.add(enterSubroutine);
+        class PushStackSpace pushStackSpace = new class PushStackSpace(0);
+        call tacGenerator.add(pushStackSpace);
+        call body.translateToTAC(tacGenerator);
+        pushStackSpace.space = tacGenerator.stackLocalIndex + 1
+    end
+
+    bool returnsOrExits() is
+        class StatementBlock body = this.body;
+        bool returnsOrExits = call body.returnsOrExits();
+        return returnsOrExits
+    end
+end
+
+class Program contains
+    class FunctionDefinition[] functions;
+    class StatementBlock body;
+    constructor(class FunctionDefinition[] functions, class StatementBlock body) is
+        this.functions = functions;
+        this.body = body
+    end
+
+    void output() is
+        for i = 0 to len this.functions do
+            class FunctionDefinition function = this.functions[i];
+            call function.output()
+        done;
+        class StatementBlock body = this.body;
+        call body.output()
+    end
+
+    void buildSymbolTable(class SymbolTable symbolTable) is
+        class StatementBlock body = this.body;
+        call body.buildSymbolTable(symbolTable);
+        for i = 0 to len this.functions do
+            class FunctionDefinition function = this.functions[i];
+            call function.buildSymbolTable(symbolTable)
+        done
+    end
+    
+    void semanticCheck(class SymbolTable symbolTable) is
+        for i = 0 to len this.functions do
+            for j = i + 1 to len this.functions do
+                class FunctionDefinition f1 = this.functions[i];
+                class FunctionDefinition f2 = this.functions[j];
+                bool match = call charArrayEqualsCharArray(f1.name, f2.name);
+                if match then
+                    print "Duplicate functions with name ";
+                    println f1.name;
+                    exit 200
+                else skip fi
+            done
+        done;
+
+        class StatementBlock body = this.body;
+        class Type anyType = new class Type(TYPE_ANY);
+        call body.semanticCheck(symbolTable, this.functions, anyType);
+        for i = 0 to len this.functions do
+            class FunctionDefinition function = this.functions[i];
+            call function.semanticCheck(symbolTable, this.functions)
+        done;
+        free anyType
+    end
+
+    class TACLine[] translateBodyToTAC(class TACGenerator tacGenerator) is
+        tacGenerator.paramList = [];
+        class TACList tacList = tacGenerator.programTAC;
+        call tacList.clear();
+        tacGenerator.stackLocalIndex = -1;
+        class StatementBlock body = this.body;
+        class EnterMainFunction enterMain = new class EnterMainFunction();
+        call tacGenerator.add(enterMain);
+        class PushStackSpace pushStackSpace = new class PushStackSpace(0);
+        call tacGenerator.add(pushStackSpace);
+        call body.translateToTAC(tacGenerator);
+        pushStackSpace.space = tacGenerator.stackLocalIndex + 1;
+        class ExitMainFunction exitMain = new class ExitMainFunction();
+        call tacGenerator.add(exitMain);
+        class TACLine[] programTAC = call tacList.asArray();
+        return programTAC
+    end
+
+    class TACLine[][] translateFunctionsToTAC(class TACGenerator tacGenerator) is
+        class TACLine[][] functionsTAC = newarray(len this.functions);
+        class TACList tacList = tacGenerator.programTAC;
+        for i = 0 to len this.functions do
+            class FunctionDefinition function = this.functions[i];
+            call tacList.clear();
+            tacGenerator.stackLocalIndex = -1;
+            call function.translateToTAC(tacGenerator);
+            class TACLine[] functionTAC = call tacList.asArray();
+            functionsTAC[i] = functionTAC
+        done;
+        return functionsTAC
+    end
+end
+
+class ExpressionList contains
+    class Expression[] array;
+    int length;
+
+    constructor() is
+        this.length = 0;
+        this.array = newarray(1);
+    skip end
+
+    void add(class Expression expression) is
+        if this.length == len this.array then
+            class Expression[] nextArray = newarray(this.length * 2);
+            for i = 0 to this.length do nextArray[i] = this.array[i] done;
+            free this.array;
+            this.array = nextArray;
+        skip else skip fi;
+
+        this.array[this.length] = expression;
+        this.length = this.length + 1;
+    skip end
+
+    class Expression[] asArray() is
+        class Expression[] array = newarray(this.length);
+        for i = 0 to this.length do
+            array[i] = this.array[i]
+        done;
+        return array
+    end
+
+    class Expression get(int i) is
+        if i < 0 || i >= this.length then
+            println "ExpressionList.get(i) error: Index out of bounds";
+            exit 1
+        else
+            return this.array[i]
+        fi
+    end
+
+    void destroy() is
+        free this.array
+    end
+
+end
+
+class FunctionDefinitionList contains
+    class FunctionDefinition[] array;
+    int length;
+
+    constructor() is
+        this.length = 0;
+        this.array = newarray(1);
+    skip end
+
+    void add(class FunctionDefinition functionDefinition) is
+        if this.length == len this.array then
+            class FunctionDefinition[] nextArray = newarray(this.length * 2);
+            for i = 0 to this.length do nextArray[i] = this.array[i] done;
+            free this.array;
+            this.array = nextArray;
+        skip else skip fi;
+
+        this.array[this.length] = functionDefinition;
+        this.length = this.length + 1;
+    skip end
+
+    class FunctionDefinition[] asArray() is
+        class FunctionDefinition[] array = newarray(this.length);
+        for i = 0 to this.length do
+            array[i] = this.array[i]
+        done;
+        return array
+    end
+
+    class FunctionDefinition get(int i) is
+        if i < 0 || i >= this.length then
+            println "FunctionDefinitionList.get(i) error: Index out of bounds";
+            exit 1
+        else
+            return this.array[i]
+        fi
+    end
+
+    void destroy() is
+        free this.array
+    end
+
+end
+
+class ParameterList contains
+    class Parameter[] array;
+    int length;
+
+    constructor() is
+        this.length = 0;
+        this.array = newarray(1);
+    skip end
+
+    void add(class Parameter parameter) is
+        if this.length == len this.array then
+            class Parameter[] nextArray = newarray(this.length * 2);
+            for i = 0 to this.length do nextArray[i] = this.array[i] done;
+            free this.array;
+            this.array = nextArray;
+        skip else skip fi;
+
+        this.array[this.length] = parameter;
+        this.length = this.length + 1;
+    skip end
+
+    class Parameter[] asArray() is
+        class Parameter[] array = newarray(this.length);
+        for i = 0 to this.length do
+            array[i] = this.array[i]
+        done;
+        return array
+    end
+
+    class Parameter get(int i) is
+        if i < 0 || i >= this.length then
+            println "FunctionDefinitionList.get(i) error: Index out of bounds";
+            exit 1
+        else
+            return this.array[i]
+        fi
+    end
+
+    void destroy() is
+        free this.array
+    end
+
+end
+
+begin
+    class FunctionDefinition getFunction(char[] name, class FunctionDefinition[] functions) is
+        for i = 0 to len functions do
+            class FunctionDefinition f = functions[i];
+            bool match = call charArrayEqualsCharArray(name, f.name);
+            if match then return f else skip fi
+        done;
+
+        print "Function ";
+        print name;
+        println " not defined";
+        exit 200
+    end
+
+    enum wordSize sizeOf(enum type type) is
+        switch type matches
+            case TYPE_INT do return WORD_FULL end
+            case TYPE_ARRAY do return WORD_FULL end
+            case TYPE_PAIR do return WORD_FULL end
+            case TYPE_STRING do return WORD_FULL end
+            case TYPE_BOOL do return WORD_BYTE end
+            case TYPE_CHAR do return WORD_BYTE end
+            case TYPE_ANY do return WORD_FULL end
+            default exit 1
+        end
+    end
+
+    int wordSize(enum wordSize wordSize) is
+        switch wordSize matches
+            case WORD_BYTE do return 1 end
+            case WORD_FULL do return 4 end
+            default exit 1
+        end
+    end
+
+    skip
+end

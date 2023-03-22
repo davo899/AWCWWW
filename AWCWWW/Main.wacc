@@ -1,0 +1,85 @@
+import Parser.wacc
+import SymbolTable.wacc
+import ThreeAddressCode.wacc
+import ARM.wacc
+
+# A WACC Compiler Written With WACC
+begin
+    pair(string, string) getFileNames() is
+        file sourceFileNameFile = fopen "source.txt";
+        class CharList sourceFileNamePathless = new class CharList();
+        class CharList sourceFileNameList = new class CharList();
+        char c = 'a';
+        while c != '\0' do
+            fread sourceFileNameFile, c;
+            call sourceFileNameList.add(c);
+            if c == '/' then
+                call sourceFileNamePathless.clear()
+            else
+                call sourceFileNamePathless.add(c)
+            fi
+        done;
+        fclose sourceFileNameFile;
+        char[] sourceFileNameArray = call sourceFileNameList.asArray();
+        string sourceFileName = call charArrayToString(sourceFileNameArray);
+        call sourceFileNameList.destroy();
+        free sourceFileNameList;
+
+        if sourceFileNamePathless.length <= 5 then exit 1 else skip fi;
+        char[] outFileNameArray = call sourceFileNamePathless.asArray();
+        call sourceFileNamePathless.destroy();
+        free sourceFileNamePathless;
+        outFileNameArray[len outFileNameArray - 5] = 's';
+        outFileNameArray[len outFileNameArray - 4] = '\0';
+        outFileNameArray[len outFileNameArray - 3] = '\0';
+        outFileNameArray[len outFileNameArray - 2] = '\0';
+        string outFileName = call charArrayToString(outFileNameArray);
+
+        pair(string, string) result = newpair(sourceFileName, outFileName);
+        return result
+    end
+
+    class Program frontEnd(string sourceFileName) is
+        class CharList source = new class CharList();
+        file sourceFile = fopen sourceFileName;
+        char c = 'a';
+        while c != '\0' do
+            fread sourceFile, c;
+            call source.add(c)
+        done;
+        fclose sourceFile;
+        
+        class SymbolTable symbolTable = new class SymbolTable();
+        class Parser parser = new class Parser(source);
+        class Program program = call parser.parse();
+        call program.output();
+        call program.buildSymbolTable(symbolTable);
+        call program.semanticCheck(symbolTable);
+        return program
+    end
+
+    println "AWCWWW: ";
+    pair(string, string) filenames = call getFileNames();
+    string sourceFileName = fst filenames;
+    string outFileName = snd filenames;
+
+    class Program program = call frontEnd(sourceFileName);
+
+    class TACGenerator tacGenerator = new class TACGenerator();
+    class TACLine[] bodyTAC = call program.translateBodyToTAC(tacGenerator);
+    class TACLine[][] functionsTAC = call program.translateFunctionsToTAC(tacGenerator);
+    char[][] strings = call tacGenerator.getStrings();
+
+    class ARMGenerator armGenerator = new class ARMGenerator(strings);
+    call armGenerator.translateToARM(bodyTAC);
+    for i = 0 to len functionsTAC do
+        class TACLine[] functionTAC = functionsTAC[i];
+        call armGenerator.translateToARM(functionTAC)
+    done;
+
+    file outFile = fnew outFileName;
+    call armGenerator.printARM(outFile);
+    fclose outFile;
+    
+    println "\nSuccess!"
+end

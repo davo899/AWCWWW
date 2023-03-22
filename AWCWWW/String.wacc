@@ -1,0 +1,61 @@
+import CharList.wacc
+
+begin
+    bool stringEqualsCharArray(string s, char[] cs) is
+        char* head = s;
+        for i = 0 to len cs do
+            if *(head + i) == '\0' then return false
+            else
+                if *(head + i) != cs[i] then return false
+                else skip fi
+            fi
+        done;
+        return *(head + len cs) == '\0'
+    end
+
+    bool charArrayEqualsCharArray(char[] cs1, char[] cs2) is
+        if len cs1 != len cs2 then return false else skip fi;
+        for i = 0 to len cs1 do
+            if cs1[i] != cs2[i] then return false else skip fi
+        done;
+        return true
+    end
+
+    bool stringEqualsString(string s1, string s2) is
+        char* h1 = s1;
+        char* h2 = s2;
+        int i = 0;
+        while *(h1 + i) != '\0' do
+            if *(h1 + i) != *(h2 + i) then return false
+            else skip fi
+        done;
+        return true
+    end
+
+    string charArrayToString(char[] cs) is
+        char[] nextCs = newarray(len cs + 1);
+        for i = 0 to len cs do
+            nextCs[i] = cs[i]
+        done;
+        nextCs[len cs] = '\0';
+        char* sPointer = nextCs;
+        string s = sPointer;
+        return s
+    end
+
+    char[] stringToCharArray(string s) is
+        class CharList charList = new class CharList();
+        char* head = s;
+        int i = 0;
+        while *(head + i) != '\0' do
+            call charList.add(*(head + i));
+            i = i + 1
+        done;
+        char[] cs = call charList.asArray();
+        call charList.destroy();
+        free charList;
+        return cs
+    end
+
+    skip
+end
